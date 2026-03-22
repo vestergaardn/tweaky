@@ -1,0 +1,37 @@
+create table companies (
+  id uuid primary key default gen_random_uuid(),
+  github_id text unique not null,
+  github_login text not null,
+  github_token text not null,
+  created_at timestamptz default now()
+);
+
+create table projects (
+  id uuid primary key default gen_random_uuid(),
+  company_id uuid references companies(id) on delete cascade,
+  name text not null,
+  repo_url text not null,
+  repo_full_name text not null,       -- e.g. "acme/frontend"
+  default_branch text not null default 'main',
+  install_command text not null default 'npm install',
+  dev_command text not null default 'npm run dev',
+  dev_port integer not null default 3000,
+  script_tag_id text unique not null default gen_random_uuid()::text,
+  created_at timestamptz default now()
+);
+
+create table submissions (
+  id uuid primary key default gen_random_uuid(),
+  project_id uuid references projects(id) on delete cascade,
+  user_prompt text not null,
+  user_email text not null,
+  bounty_amount integer not null,
+  pr_url text,
+  pr_number integer,
+  status text not null default 'pending',   -- pending | merged | rejected
+  created_at timestamptz default now()
+);
+
+alter table companies enable row level security;
+alter table projects enable row level security;
+alter table submissions enable row level security;
