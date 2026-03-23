@@ -110,6 +110,14 @@ ANTHROPIC_API_KEY=
 
 # App
 NEXT_PUBLIC_APP_URL=http://localhost:3000
+
+# Demo app credentials — injected into sandbox at runtime
+DEMO_MONGODB_URL=mongodb+srv://...
+DEMO_JWT_SECRET=some_long_random_string
+DEMO_SESSION_SECRET=another_long_random_string
+DEMO_CLOUDINARY_NAME=
+DEMO_CLOUDINARY_API_KEY=
+DEMO_CLOUDINARY_API_SECRET=
 ```
 
 ---
@@ -545,14 +553,22 @@ export async function GET(req: Request, { params }: { params: { scriptTagId: str
 
 **File: `app/api/sandbox/create/route.ts`**
 
-Called when the user clicks "Improve this". This is the longest-running request — it clones the repo and runs npm install.
+Called when the user clicks "Improve this". This is the longest-running request — it clones the repo, writes env files, installs dependencies, and starts both backend and frontend processes.
+
+Key differences from the single-process version:
+- Gets E2B host URLs for **both port 4000 and port 5173** before writing any files
+- Writes **two `.env` files** — one for the API, one for the client — with the correct URLs injected
+- Runs **`yarn install` in parallel** in both `api/` and `client/` directories
+- Starts the **API process first**, waits 3 seconds for MongoDB to connect, then starts the client
+- Patches `vite.config.js` to allow E2B preview hosts (same as before)
+- Returns the **client URL** (port 5173) as the preview URL
 
 ```typescript
 import { Sandbox } from "@e2b/code-interpreter"
 import { supabaseAdmin } from "@/lib/supabase"
 import { NextResponse } from "next/server"
 
-export const maxDuration = 120 // Requires Vercel Pro for > 10s
+export const maxDuration = 120
 
 export async function POST(req: Request) {
   const { scriptTagId } = await req.json()
@@ -566,22 +582,56 @@ export async function POST(req: Request) {
   if (!project) return NextResponse.json({ error: "Not found" }, { status: 404 })
 
   const githubToken = (project.companies as any).github_token
-  // Embed token in clone URL so git can authenticate without interactive prompt
   const repoUrl = `https://oauth2:${githubToken}@github.com/${project.repo_full_name}.git`
 
   const sandbox = await Sandbox.create({
-    timeoutMs: 60 * 60 * 1000, // keep alive up to 1 hour
+    timeoutMs: 60 * 60 * 1000,
   })
 
-  // Clone the repo
+  // Step 1: Clone repo
   await sandbox.commands.run(`git clone ${repoUrl} /app`)
 
-  // Install dependencies
-  await sandbox.commands.run(project.install_command, { cwd: "/app" })
+  // Step 2: Get both host URLs upfront — needed before writing .env files
+  const apiHost = sandbox.getHost(4000)
+  const clientHost = sandbox.getHost(project.dev_port)
+  const apiUrl = `https://${apiHost}`
+  const clientUrl = `https://${clientHost}`
 
-  // Patch vite.config.js to allow E2B preview hosts and disable HMR.
-  // HMR websockets don't work across the E2B proxy — Vite falls back to
-  // full-page reload on file change, which is still live feedback.
+  // Step 3: Write API .env
+  const apiEnv = [
+    `PORT=4000`,
+    `DB_URL=${process.env.DEMO_MONGODB_URL}`,
+    `JWT_SECRET=${process.env.DEMO_JWT_SECRET}`,
+    `JWT_EXPIRY=20d`,
+    `COOKIE_TIME=7`,
+    `SESSION_SECRET=${process.env.DEMO_SESSION_SECRET}`,
+    `CLOUDINARY_NAME=${process.env.DEMO_CLOUDINARY_NAME}`,
+    `CLOUDINARY_API_KEY=${process.env.DEMO_CLOUDINARY_API_KEY}`,
+    `CLOUDINARY_API_SECRET=${process.env.DEMO_CLOUDINARY_API_SECRET}`,
+    `CLIENT_URL=${clientUrl}`,
+  ].join("\n")
+
+  await sandbox.files.write("/app/api/.env", apiEnv)
+
+  // Step 4: Write client .env
+  const clientEnv = [
+    `VITE_BASE_URL=${apiUrl}`,
+    `VITE_GOOGLE_CLIENT_ID=`,
+  ].join("\n")
+
+  await sandbox.files.write("/app/client/.env", clientEnv)
+
+  // Step 5: Install dependencies in parallel
+  await Promise.all([
+    sandbox.commands.run("yarn install", { cwd: "/app/api" }),
+    sandbox.commands.run("yarn install", { cwd: "/app/client" }),
+  ])
+
+  // Step 6: Start API in background, wait for MongoDB to connect
+  sandbox.commands.run("yarn start", { cwd: "/app/api", background: true })
+  await new Promise((r) => setTimeout(r, 3000))
+
+  // Step 7: Patch vite.config.js to allow E2B preview hosts
   const viteConfig = `
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
@@ -598,19 +648,15 @@ export default defineConfig({
 })
 `.trim()
 
-  await sandbox.files.write("/app/vite.config.js", viteConfig)
+  await sandbox.files.write("/app/client/vite.config.js", viteConfig)
 
-  // Start dev server in background — do not await
-  sandbox.commands.run(project.dev_command, { cwd: "/app", background: true })
-
-  // Give Vite a moment to boot before returning the URL
-  await new Promise((r) => setTimeout(r, 4000))
-
-  const previewUrl = `https://${sandbox.getHost(project.dev_port)}`
+  // Step 8: Start client in background
+  sandbox.commands.run("yarn dev", { cwd: "/app/client", background: true })
+  await new Promise((r) => setTimeout(r, 5000))
 
   return NextResponse.json({
     sandboxId: sandbox.sandboxId,
-    previewUrl,
+    previewUrl: clientUrl,
   })
 }
 ```
@@ -618,6 +664,11 @@ export default defineConfig({
 ### Step 4.3 — Prompt endpoint
 
 **File: `app/api/sandbox/prompt/route.ts`**
+
+Key differences from the single-directory version:
+- Reads from **both `/app/client/src` and `/app/api`** instead of just `/app/src`
+- Explicitly **skips `node_modules` and `.git`** directories to avoid reading thousands of files
+- Updated **LLM system prompt** describes a full-stack app and tells Claude how to reference both frontend and backend paths
 
 ```typescript
 import { Sandbox } from "@e2b/code-interpreter"
@@ -632,24 +683,35 @@ export async function POST(req: Request) {
   const { sandboxId, prompt } = await req.json()
 
   const sandbox = await Sandbox.connect(sandboxId)
-  const files = await readSourceFiles(sandbox, "/app/src")
+
+  // Read from both client and api directories
+  const [clientFiles, apiFiles] = await Promise.all([
+    readSourceFiles(sandbox, "/app/client/src"),
+    readSourceFiles(sandbox, "/app/api"),
+  ])
+
+  const files = { ...clientFiles, ...apiFiles }
 
   const message = await anthropic.messages.create({
     model: "claude-sonnet-4-5",
     max_tokens: 8096,
-    system: `You are a code editor for a React application.
-You receive the full source code and a user request.
-Make only the changes needed to fulfil the request.
+    system: `You are a code editor for a full-stack MERN application (MongoDB, Express, React, Node.js).
+You have access to both the React frontend (client/src/) and the Express backend (api/).
+The frontend runs on port 5173. The backend API runs on port 4000.
+
+Make only the changes needed to fulfil the user's request.
 
 RULES:
 - Respond with ONLY a JSON object. No explanation. No markdown fences.
 - The JSON must have a "files" key: an array of {path, content} objects.
 - Only include files that need to change.
-- Paths are relative to /app (e.g. "src/components/Navbar.tsx").
+- Frontend paths are relative to /app e.g. "client/src/components/Navbar.jsx"
+- Backend paths are relative to /app e.g. "api/routes/listing.js"
 - Preserve all existing functionality unrelated to the request.
+- When changing the API, update the frontend to match if needed, and vice versa.
 
 Example:
-{"files": [{"path": "src/components/Navbar.tsx", "content": "...full content..."}]}`,
+{"files": [{"path": "client/src/components/Navbar.jsx", "content": "..."}, {"path": "api/routes/listing.js", "content": "..."}]}`,
     messages: [{
       role: "user",
       content: `Source code:\n\n${JSON.stringify(files, null, 2)}\n\nRequest: ${prompt}`,
@@ -680,10 +742,15 @@ async function readSourceFiles(
   dirPath: string
 ): Promise<Record<string, string>> {
   const result: Record<string, string> = {}
+
   try {
     const entries = await sandbox.files.list(dirPath)
     for (const entry of entries) {
+      // Always skip these — they are huge and irrelevant
+      if (entry.name === "node_modules" || entry.name === ".git") continue
+
       const fullPath = `${dirPath}/${entry.name}`
+
       if (entry.type === "dir") {
         Object.assign(result, await readSourceFiles(sandbox, fullPath))
       } else if (/\.(tsx?|jsx?|css|json)$/.test(entry.name)) {
@@ -693,6 +760,7 @@ async function readSourceFiles(
   } catch {
     // Directory may not exist — skip silently
   }
+
   return result
 }
 ```

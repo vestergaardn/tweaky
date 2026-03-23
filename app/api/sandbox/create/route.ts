@@ -22,9 +22,50 @@ export async function POST(req: Request) {
     timeoutMs: 60 * 60 * 1000,
   })
 
+  // Step 1: Clone repo
   await sandbox.commands.run(`git clone ${repoUrl} /app`)
-  await sandbox.commands.run(project.install_command, { cwd: "/app" })
 
+  // Step 2: Get both host URLs upfront — needed before writing .env files
+  const apiHost = sandbox.getHost(4000)
+  const clientHost = sandbox.getHost(project.dev_port)
+  const apiUrl = `https://${apiHost}`
+  const clientUrl = `https://${clientHost}`
+
+  // Step 3: Write API .env
+  const apiEnv = [
+    `PORT=4000`,
+    `DB_URL=${process.env.DEMO_MONGODB_URL}`,
+    `JWT_SECRET=${process.env.DEMO_JWT_SECRET}`,
+    `JWT_EXPIRY=20d`,
+    `COOKIE_TIME=7`,
+    `SESSION_SECRET=${process.env.DEMO_SESSION_SECRET}`,
+    `CLOUDINARY_NAME=${process.env.DEMO_CLOUDINARY_NAME}`,
+    `CLOUDINARY_API_KEY=${process.env.DEMO_CLOUDINARY_API_KEY}`,
+    `CLOUDINARY_API_SECRET=${process.env.DEMO_CLOUDINARY_API_SECRET}`,
+    `CLIENT_URL=${clientUrl}`,
+  ].join("\n")
+
+  await sandbox.files.write("/app/api/.env", apiEnv)
+
+  // Step 4: Write client .env
+  const clientEnv = [
+    `VITE_BASE_URL=${apiUrl}`,
+    `VITE_GOOGLE_CLIENT_ID=`,
+  ].join("\n")
+
+  await sandbox.files.write("/app/client/.env", clientEnv)
+
+  // Step 5: Install dependencies in parallel
+  await Promise.all([
+    sandbox.commands.run("yarn install", { cwd: "/app/api" }),
+    sandbox.commands.run("yarn install", { cwd: "/app/client" }),
+  ])
+
+  // Step 6: Start API in background, wait for MongoDB to connect
+  sandbox.commands.run("yarn start", { cwd: "/app/api", background: true })
+  await new Promise((r) => setTimeout(r, 3000))
+
+  // Step 7: Patch vite.config.js to allow E2B preview hosts
   const viteConfig = `
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
@@ -41,16 +82,14 @@ export default defineConfig({
 })
 `.trim()
 
-  await sandbox.files.write("/app/vite.config.js", viteConfig)
+  await sandbox.files.write("/app/client/vite.config.js", viteConfig)
 
-  sandbox.commands.run(project.dev_command, { cwd: "/app", background: true })
-
-  await new Promise((r) => setTimeout(r, 4000))
-
-  const previewUrl = `https://${sandbox.getHost(project.dev_port)}`
+  // Step 8: Start client in background
+  sandbox.commands.run("yarn dev", { cwd: "/app/client", background: true })
+  await new Promise((r) => setTimeout(r, 5000))
 
   return NextResponse.json({
     sandboxId: sandbox.sandboxId,
-    previewUrl,
+    previewUrl: clientUrl,
   })
 }
