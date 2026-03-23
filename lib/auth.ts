@@ -18,11 +18,20 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
   callbacks: {
     async signIn({ user, account, profile }) {
       if (account?.provider === "github" && account.access_token) {
-        await getSupabaseAdmin().from("companies").upsert({
-          github_id: String(account.providerAccountId),
-          github_login: (profile as any)?.login ?? user.name ?? "",
-          github_token: account.access_token,
-        }, { onConflict: "github_id" })
+        try {
+          const { error } = await getSupabaseAdmin().from("companies").upsert({
+            github_id: String(account.providerAccountId),
+            github_login: (profile as any)?.login ?? user.name ?? "",
+            github_token: account.access_token,
+          }, { onConflict: "github_id" })
+          if (error) {
+            console.error("Failed to upsert company on sign-in:", error)
+            return false
+          }
+        } catch (err) {
+          console.error("Sign-in error (check SUPABASE env vars):", err)
+          return false
+        }
       }
       return true
     },
