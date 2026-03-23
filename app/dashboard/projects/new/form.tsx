@@ -49,6 +49,7 @@ export function NewProjectForm({
     <form action={action} className="space-y-5">
       {/* Hidden fields populated from selected repo */}
       <input type="hidden" name="repo_url" value={selected?.html_url ?? ""} />
+      <input type="hidden" name="repo_full_name" value={selected?.full_name ?? ""} />
       <input type="hidden" name="default_branch" value={selected?.default_branch ?? "main"} />
 
       {/* Repo picker */}
