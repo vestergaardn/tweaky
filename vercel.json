@@ -1,0 +1,7 @@
+{
+  "functions": {
+    "app/api/sandbox/create/route.ts": { "maxDuration": 120 },
+    "app/api/sandbox/prompt/route.ts": { "maxDuration": 60 },
+    "app/api/sandbox/submit/route.ts": { "maxDuration": 60 }
+  }
+}
