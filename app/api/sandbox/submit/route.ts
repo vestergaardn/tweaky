@@ -8,7 +8,8 @@ export const maxDuration = 60
 export function OPTIONS() { return corsOptions() }
 
 export async function POST(req: Request) {
-  const { sandboxId, scriptTagId, prompt, bountyAmount, userEmail } = await req.json()
+  try {
+    const { sandboxId, scriptTagId, prompt, bountyAmount, userEmail } = await req.json()
 
   const { data: project } = await getSupabaseAdmin()
     .from("projects")
@@ -115,4 +116,11 @@ ${diff}
   await sandbox.kill()
 
   return corsResponse({ prUrl: pr.html_url })
+  } catch (error) {
+    console.error("[sandbox/submit] Error:", error)
+    return corsResponse(
+      { error: error instanceof Error ? error.message : "Internal server error" },
+      { status: 500 },
+    )
+  }
 }
