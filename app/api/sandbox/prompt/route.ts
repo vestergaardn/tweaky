@@ -9,22 +9,23 @@ export function OPTIONS() { return corsOptions() }
 const anthropic = new Anthropic()
 
 export async function POST(req: Request) {
-  const { sandboxId, prompt } = await req.json()
+  try {
+    const { sandboxId, prompt } = await req.json()
 
-  const sandbox = await Sandbox.connect(sandboxId)
+    const sandbox = await Sandbox.connect(sandboxId)
 
-  // Read from both client and api directories
-  const [clientFiles, apiFiles] = await Promise.all([
-    readSourceFiles(sandbox, "/app/client/src"),
-    readSourceFiles(sandbox, "/app/api"),
-  ])
+    // Read from both client and api directories
+    const [clientFiles, apiFiles] = await Promise.all([
+      readSourceFiles(sandbox, "/app/client/src"),
+      readSourceFiles(sandbox, "/app/api"),
+    ])
 
-  const files = { ...clientFiles, ...apiFiles }
+    const files = { ...clientFiles, ...apiFiles }
 
-  const message = await anthropic.messages.create({
-    model: "claude-sonnet-4-5",
-    max_tokens: 8192,
-    system: `You are a code editor for a full-stack MERN application (MongoDB, Express, React, Node.js).
+    const message = await anthropic.messages.create({
+      model: "claude-sonnet-4-5",
+      max_tokens: 8192,
+      system: `You are a code editor for a full-stack MERN application (MongoDB, Express, React, Node.js).
 You have access to both the React frontend (client/src/) and the Express backend (api/).
 The frontend runs on port 5173. The backend API runs on port 4000.
 
@@ -41,29 +42,36 @@ RULES:
 
 Example:
 {"files": [{"path": "client/src/components/Navbar.jsx", "content": "..."}, {"path": "api/routes/listing.js", "content": "..."}]}`,
-    messages: [{
-      role: "user",
-      content: `Source code:\n\n${JSON.stringify(files, null, 2)}\n\nRequest: ${prompt}`,
-    }],
-  })
+      messages: [{
+        role: "user",
+        content: `Source code:\n\n${JSON.stringify(files, null, 2)}\n\nRequest: ${prompt}`,
+      }],
+    })
 
-  const text = message.content[0].type === "text" ? message.content[0].text : ""
+    const text = message.content[0].type === "text" ? message.content[0].text : ""
 
-  let changedFiles: { path: string; content: string }[] = []
-  try {
-    changedFiles = JSON.parse(text).files ?? []
-  } catch {
-    return corsResponse({ error: "LLM returned invalid response" }, { status: 500 })
+    let changedFiles: { path: string; content: string }[] = []
+    try {
+      changedFiles = JSON.parse(text).files ?? []
+    } catch {
+      return corsResponse({ error: "LLM returned invalid response" }, { status: 500 })
+    }
+
+    for (const file of changedFiles) {
+      await sandbox.files.write(`/app/${file.path}`, file.content)
+    }
+
+    return corsResponse({
+      success: true,
+      changedFiles: changedFiles.map((f) => f.path),
+    })
+  } catch (error) {
+    console.error("[sandbox/prompt] Error:", error)
+    return corsResponse(
+      { error: error instanceof Error ? error.message : "Internal server error" },
+      { status: 500 },
+    )
   }
-
-  for (const file of changedFiles) {
-    await sandbox.files.write(`/app/${file.path}`, file.content)
-  }
-
-  return corsResponse({
-    success: true,
-    changedFiles: changedFiles.map((f) => f.path),
-  })
 }
 
 async function readSourceFiles(
