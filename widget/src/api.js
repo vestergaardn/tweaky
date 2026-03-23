@@ -1,4 +1,9 @@
-const API_URL = process.env.API_URL
+const scriptTag =
+  document.currentScript ||
+  document.querySelector("script[data-project-id]")
+const API_URL = scriptTag
+  ? new URL(scriptTag.src).origin
+  : window.location.origin
 
 export async function callCreateSandbox(projectId) {
   const res = await fetch(`${API_URL}/api/sandbox/create`, {

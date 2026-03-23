@@ -41,6 +41,5 @@ yarn-error.log*
 next-env.d.ts
 
 # widget
-/public/widget.js
 /widget/node_modules
 .env*.local
