@@ -34,9 +34,32 @@ export async function POST(req: Request) {
 
     const githubToken = (project.companies as any)?.github_token
     if (!githubToken) {
-      return corsResponse({ error: "GitHub token not configured for this project" }, { status: 500 })
+      return corsResponse({ error: "GitHub token not configured" }, { status: 500 })
     }
-    const repoUrl = `https://oauth2:${githubToken}@github.com/${project.repo_full_name}.git`
+
+    // Step 1: Download repo tarball via GitHub API (avoids git clone inside sandbox)
+    const [owner, repo] = project.repo_full_name.split("/")
+    const branch = project.default_branch || "main"
+    let tarballBytes: Buffer
+    try {
+      const tarballRes = await fetch(
+        `https://api.github.com/repos/${owner}/${repo}/tarball/${branch}`,
+        { headers: { Authorization: `Bearer ${githubToken}`, Accept: "application/vnd.github+json" }, redirect: "follow" },
+      )
+      if (!tarballRes.ok) {
+        const body = await tarballRes.text().catch(() => "")
+        console.error("[sandbox/create] GitHub tarball download failed:", tarballRes.status, body)
+        return corsResponse(
+          { error: `GitHub repo download failed (${tarballRes.status}): check token permissions and repo access` },
+          { status: 500 },
+        )
+      }
+      tarballBytes = Buffer.from(await tarballRes.arrayBuffer())
+    } catch (dlErr) {
+      const msg = dlErr instanceof Error ? dlErr.message : String(dlErr)
+      console.error("[sandbox/create] GitHub tarball download failed:", msg)
+      return corsResponse({ error: `GitHub repo download failed: ${msg}` }, { status: 500 })
+    }
 
     let sandbox: Awaited<ReturnType<typeof Sandbox.create>>
     try {
@@ -48,19 +71,34 @@ export async function POST(req: Request) {
       return corsResponse({ error: "Failed to create sandbox — check E2B_API_KEY" }, { status: 500 })
     }
 
-    // Step 1: Clone repo
+    // Upload tarball and extract into /app
     try {
-      const cloneResult = await sandbox.commands.run(`git clone ${repoUrl} /app`)
-      if (cloneResult.exitCode !== 0) {
-        console.error("[sandbox/create] Git clone failed:", cloneResult.stderr)
+      await sandbox.files.write("/tmp/repo.tar.gz", tarballBytes)
+      const extract = await sandbox.commands.run(
+        "mkdir -p /app && tar xzf /tmp/repo.tar.gz --strip-components=1 -C /app",
+        { timeoutMs: 60_000 },
+      )
+      if (extract.exitCode !== 0) {
+        const detail = (extract.stderr || extract.stdout || "unknown error").trim()
+        console.error("[sandbox/create] Tarball extract failed:", detail)
         await sandbox.kill()
-        return corsResponse({ error: `Git clone failed: ${cloneResult.stderr.replace(/oauth2:[^@]+@/, "oauth2:***@")}` }, { status: 500 })
+        return corsResponse({ error: `Repo extract failed: ${detail}` }, { status: 500 })
       }
-    } catch (cloneErr) {
-      const msg = cloneErr instanceof Error ? cloneErr.message : String(cloneErr)
-      console.error("[sandbox/create] Git clone failed:", msg)
+    } catch (extractErr) {
+      const msg = extractErr instanceof Error ? extractErr.message : String(extractErr)
+      console.error("[sandbox/create] Tarball extract failed:", msg)
       await sandbox.kill()
-      return corsResponse({ error: `Git clone failed: ${msg.replace(/oauth2:[^@]+@/, "oauth2:***@")}` }, { status: 500 })
+      return corsResponse({ error: `Repo extract failed: ${msg}` }, { status: 500 })
+    }
+
+    // Init a git repo so the submit route can use git diff to detect changes
+    try {
+      await sandbox.commands.run(
+        'cd /app && git init && git add -A && git commit -m "initial"',
+        { timeoutMs: 60_000 },
+      )
+    } catch {
+      // Non-fatal — submit route will still work via file reads
     }
 
     // Step 2: Write .env file (if the project has env vars)
@@ -75,7 +113,7 @@ export async function POST(req: Request) {
 
     // Step 3: Install dependencies
     try {
-      const installResult = await sandbox.commands.run(project.install_command || "npm install", { cwd: "/app" })
+      const installResult = await sandbox.commands.run(project.install_command || "npm install", { cwd: "/app", timeoutMs: 120_000 })
       if (installResult.exitCode !== 0) {
         console.error("[sandbox/create] Install failed:", installResult.stderr)
         await sandbox.kill()
