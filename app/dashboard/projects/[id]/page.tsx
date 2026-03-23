@@ -25,7 +25,7 @@ export default async function ProjectDetail({
 
   if (!project) redirect("/dashboard")
 
-  const appUrl = process.env.NEXT_PUBLIC_APP_URL || "https://tweaky.app"
+  const appUrl = process.env.NEXT_PUBLIC_APP_URL || "https://tweaky.vercel.app"
   const snippet = `<script src="${appUrl}/widget.js" data-project-id="${project.script_tag_id}"></script>`
 
   return (
