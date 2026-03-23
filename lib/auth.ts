@@ -36,14 +36,22 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
       return true
     },
     async session({ session, token }) {
-      const { data } = await getSupabaseAdmin()
-        .from("companies")
-        .select("id, github_login")
-        .eq("github_id", String(token.sub))
-        .single()
-      if (data) {
-        session.user.companyId = data.id
-        session.user.githubLogin = data.github_login
+      try {
+        const { data, error } = await getSupabaseAdmin()
+          .from("companies")
+          .select("id, github_login")
+          .eq("github_id", String(token.sub))
+          .maybeSingle()
+        if (error) {
+          console.error("Session company lookup failed:", error, "token.sub:", token.sub)
+        } else if (data) {
+          session.user.companyId = data.id
+          session.user.githubLogin = data.github_login
+        } else {
+          console.error("No company found for github_id:", token.sub)
+        }
+      } catch (err) {
+        console.error("Session callback error:", err)
       }
       return session
     },
