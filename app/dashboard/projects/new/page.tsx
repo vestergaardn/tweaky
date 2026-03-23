@@ -1,6 +1,7 @@
 import { auth } from "@/lib/auth"
 import { getSupabaseAdmin } from "@/lib/supabase"
 import { redirect } from "next/navigation"
+import { NewProjectForm } from "./form"
 
 export default function NewProject() {
   async function createProject(formData: FormData) {
@@ -32,36 +33,7 @@ export default function NewProject() {
   return (
     <div className="max-w-lg space-y-6">
       <h1 className="text-2xl font-bold">New Project</h1>
-      <form action={createProject} className="space-y-4">
-        <Field name="name" label="Project name" placeholder="My App" required />
-        <Field name="repo_url" label="GitHub repo URL" placeholder="https://github.com/acme/my-app" required />
-        <Field name="default_branch" label="Default branch" placeholder="main" />
-        <Field name="install_command" label="Install command" placeholder="npm install" />
-        <Field name="dev_command" label="Dev command" placeholder="npm run dev" />
-        <Field name="dev_port" label="Dev port" placeholder="3000" />
-        <button
-          type="submit"
-          className="w-full bg-zinc-900 text-white py-2.5 rounded-lg font-medium"
-        >
-          Create Project
-        </button>
-      </form>
-    </div>
-  )
-}
-
-function Field({ name, label, placeholder, required }: {
-  name: string; label: string; placeholder: string; required?: boolean
-}) {
-  return (
-    <div className="space-y-1.5">
-      <label className="text-sm font-medium text-zinc-700">{label}</label>
-      <input
-        name={name}
-        placeholder={placeholder}
-        required={required}
-        className="w-full border rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-zinc-900"
-      />
+      <NewProjectForm action={createProject} />
     </div>
   )
 }
