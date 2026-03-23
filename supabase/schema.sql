@@ -17,6 +17,7 @@ create table projects (
   dev_command text not null default 'npm run dev',
   dev_port integer not null default 3000,
   script_tag_id text unique not null default gen_random_uuid()::text,
+  env_file_path text not null default '.env',
   created_at timestamptz default now()
 );
 
@@ -32,6 +33,16 @@ create table submissions (
   created_at timestamptz default now()
 );
 
+create table project_env_vars (
+  id uuid primary key default gen_random_uuid(),
+  project_id uuid references projects(id) on delete cascade not null,
+  key text not null,
+  value text not null,
+  created_at timestamptz default now(),
+  unique(project_id, key)
+);
+
 alter table companies enable row level security;
 alter table projects enable row level security;
 alter table submissions enable row level security;
+alter table project_env_vars enable row level security;
