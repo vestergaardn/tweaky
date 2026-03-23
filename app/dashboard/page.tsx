@@ -1,9 +1,21 @@
+import { redirect } from "next/navigation"
 import Link from "next/link"
 import { Plus, FolderGit2, FolderPlus } from "lucide-react"
+import { auth } from "@/lib/auth"
+import { getSupabaseAdmin } from "@/lib/supabase"
 
 export default async function Dashboard() {
-  // TODO: restore auth + data fetching once env vars are configured
-  const projects: any[] = []
+  const session = await auth()
+  const companyId = session?.user?.companyId
+  if (!companyId) redirect("/")
+
+  const { data: projects } = await getSupabaseAdmin()
+    .from("projects")
+    .select("*")
+    .eq("company_id", companyId)
+    .order("created_at", { ascending: false })
+
+  if (!projects) redirect("/")
 
   return (
     <div className="space-y-6">
