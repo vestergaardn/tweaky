@@ -23,6 +23,7 @@ export default function NewProject() {
         install_command: (formData.get("install_command") as string) || "npm install",
         dev_command: (formData.get("dev_command") as string) || "npm run dev",
         dev_port: parseInt((formData.get("dev_port") as string) || "3000"),
+        env_file_path: (formData.get("env_file_path") as string) || ".env",
       })
       .select()
       .single()

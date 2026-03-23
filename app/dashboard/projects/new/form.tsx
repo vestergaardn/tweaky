@@ -125,6 +125,7 @@ export function NewProjectForm({
       <Field name="install_command" label="Install command" placeholder="npm install" />
       <Field name="dev_command" label="Dev command" placeholder="npm run dev" />
       <Field name="dev_port" label="Dev port" placeholder="3000" />
+      <Field name="env_file_path" label="Env file path" placeholder=".env" />
 
       <button
         type="submit"
