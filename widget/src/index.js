@@ -7,7 +7,7 @@ const scriptTag =
 const projectId = scriptTag?.getAttribute("data-project-id")
 
 if (!projectId) {
-  console.error("[Lingua Code] Missing data-project-id on script tag")
+  console.error("[Tweaky] Missing data-project-id on script tag")
 } else {
   if (document.readyState === "loading") {
     document.addEventListener("DOMContentLoaded", () => init(projectId))
@@ -19,7 +19,7 @@ if (!projectId) {
 function init(projectId) {
   const btn = document.createElement("button")
   btn.id = "lc-trigger"
-  btn.textContent = "\u2726 Improve this"
+  btn.textContent = "\u2726 Tweak this"
   btn.style.cssText = `
     position: fixed;
     bottom: 24px;

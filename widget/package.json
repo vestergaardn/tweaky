@@ -1,5 +1,5 @@
 {
-  "name": "lingua-code-widget",
+  "name": "tweaky-widget",
   "private": true,
   "scripts": {
     "build": "node build.js"

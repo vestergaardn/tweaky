@@ -1,34 +1,11 @@
-import { auth } from "@/lib/auth"
-import { getSupabaseAdmin } from "@/lib/supabase"
 import { redirect } from "next/navigation"
 import { NewProjectForm } from "./form"
 
 export default function NewProject() {
   async function createProject(formData: FormData) {
     "use server"
-    const session = await auth()
-    if (!session) redirect("/")
-
-    const repoUrl = formData.get("repo_url") as string
-    const repoFullName = repoUrl.replace("https://github.com/", "").replace(/\/$/, "")
-
-    const { data } = await getSupabaseAdmin()
-      .from("projects")
-      .insert({
-        company_id: session.user.companyId,
-        name: formData.get("name") as string,
-        repo_url: repoUrl,
-        repo_full_name: repoFullName,
-        default_branch: (formData.get("default_branch") as string) || "main",
-        install_command: (formData.get("install_command") as string) || "npm install",
-        dev_command: (formData.get("dev_command") as string) || "npm run dev",
-        dev_port: parseInt((formData.get("dev_port") as string) || "3000"),
-        env_file_path: (formData.get("env_file_path") as string) || ".env",
-      })
-      .select()
-      .single()
-
-    if (data) redirect(`/dashboard/projects/${data.id}`)
+    // TODO: restore auth + Supabase insert once env vars are configured
+    redirect("/dashboard")
   }
 
   return (

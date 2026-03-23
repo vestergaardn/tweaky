@@ -1,30 +1,28 @@
-import { auth, signOut } from "@/lib/auth"
-import { redirect } from "next/navigation"
+import Link from "next/link"
+import { LogOut } from "lucide-react"
+import { signOut } from "@/lib/auth"
 
 export default async function DashboardLayout({
   children,
 }: {
   children: React.ReactNode
 }) {
-  const session = await auth()
-  if (!session) redirect("/")
   return (
     <div className="min-h-screen bg-zinc-50">
-      <nav className="border-b bg-white px-6 py-4 flex items-center justify-between">
-        <span className="font-semibold">Lingua Code</span>
-        <div className="flex items-center gap-4">
-          <span className="text-sm text-zinc-500">{session.user.githubLogin}</span>
-          <form
-            action={async () => {
-              "use server"
-              await signOut({ redirectTo: "/" })
-            }}
-          >
-            <button className="text-sm text-zinc-400 hover:text-zinc-600">
-              Sign out
-            </button>
-          </form>
-        </div>
+      <nav className="border-b bg-white px-6 py-4 flex items-center justify-between shadow-sm">
+        <Link href="/dashboard" className="text-zinc-900 font-bold text-lg">
+          Tweaky
+        </Link>
+        <form
+          action={async () => {
+            "use server"
+            await signOut({ redirectTo: "/" })
+          }}
+        >
+          <button type="submit" className="text-zinc-400 hover:text-zinc-700 p-1.5 rounded-md hover:bg-zinc-100">
+            <LogOut size={16} />
+          </button>
+        </form>
       </nav>
       <main className="max-w-4xl mx-auto px-6 py-10">{children}</main>
     </div>

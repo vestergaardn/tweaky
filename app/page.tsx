@@ -1,23 +1,25 @@
-import { signIn } from "@/lib/auth"
+import { auth, signIn } from "@/lib/auth"
+import { redirect } from "next/navigation"
 
-export default function Home() {
+export default async function Home() {
+  const session = await auth()
+  if (session) redirect("/dashboard")
+
   return (
-    <main className="min-h-screen flex flex-col items-center justify-center gap-6">
-      <h1 className="text-4xl font-bold">Lingua Code</h1>
-      <p className="text-zinc-500">Let your users improve your product.</p>
+    <div className="min-h-screen bg-zinc-50 flex items-center justify-center">
       <form
         action={async () => {
           "use server"
-          await signIn("github", { redirectTo: "/dashboard" })
+          await signIn("github")
         }}
       >
         <button
           type="submit"
-          className="bg-zinc-900 text-white px-6 py-3 rounded-lg font-medium"
+          className="bg-zinc-900 text-white px-6 py-3 rounded-lg font-medium hover:bg-zinc-800 transition-colors"
         >
           Sign in with GitHub
         </button>
       </form>
-    </main>
+    </div>
   )
 }

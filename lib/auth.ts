@@ -3,6 +3,7 @@ import GitHub from "next-auth/providers/github"
 import { getSupabaseAdmin } from "./supabase"
 
 export const { handlers, signIn, signOut, auth } = NextAuth({
+  secret: process.env.AUTH_SECRET || process.env.NEXTAUTH_SECRET,
   providers: [
     GitHub({
       clientId: process.env.GITHUB_CLIENT_ID!,

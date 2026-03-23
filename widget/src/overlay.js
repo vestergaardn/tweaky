@@ -186,7 +186,7 @@ export function openOverlay(projectId, onClose) {
     </style>
 
     <div id="lc-topbar">
-      <span id="lc-topbar-title">\u2726 Lingua Code \u2014 Sandbox Preview</span>
+      <span id="lc-topbar-title">\u2726 Tweaky \u2014 Sandbox Preview</span>
       <button id="lc-close-btn">\u00d7</button>
     </div>
 
@@ -265,7 +265,7 @@ export function openOverlay(projectId, onClose) {
       setStatus("Ready \u2014 the app is running live. Describe a change below.")
     } catch (err) {
       setStatus("Failed to start sandbox. Please close and try again.")
-      console.error("[Lingua Code]", err)
+      console.error("[Tweaky]", err)
     }
   })()
 
@@ -344,7 +344,7 @@ export function openOverlay(projectId, onClose) {
       const link = document.createElement("a")
       link.href = /^https:\/\/github\.com\//.test(prUrl) ? prUrl : "#"
       link.target = "_blank"
-      link.style.cssText = "color:#16a34a;font-size:14px;font-weight:500;text-decoration:none;border-bottom:1px solid #16a34a;"
+      link.style.cssText = "color:#18181b;font-size:14px;font-weight:500;text-decoration:none;border-bottom:1px solid #18181b;"
       link.textContent = "View on GitHub \u2192"
 
       successContainer.append(emoji, title, subtitle, link)
