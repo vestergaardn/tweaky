@@ -75,7 +75,7 @@ export async function POST(req: Request) {
     // Download and extract tarball directly inside the sandbox (avoids binary transfer via files API)
     try {
       const extract = await sandbox.commands.run(
-        `mkdir -p /home/user/app && curl -fsSL "$TARBALL_URL" | tar xz --strip-components=1 -C /home/user/app`,
+        `set -o pipefail && mkdir -p /home/user/app && curl -fsSL "$TARBALL_URL" | tar xz --strip-components=1 -C /home/user/app && ls /home/user/app/ | grep -q .`,
         { timeoutMs: 120_000, envs: { TARBALL_URL: tarballUrl } },
       )
       if (extract.exitCode !== 0) {
