@@ -1,9 +1,11 @@
 import { Sandbox } from "@e2b/code-interpreter"
 import { Octokit } from "@octokit/rest"
 import { getSupabaseAdmin } from "@/lib/supabase"
-import { NextResponse } from "next/server"
+import { corsResponse, corsOptions } from "@/lib/cors"
 
 export const maxDuration = 60
+
+export function OPTIONS() { return corsOptions() }
 
 export async function POST(req: Request) {
   const { sandboxId, scriptTagId, prompt, bountyAmount, userEmail } = await req.json()
@@ -14,7 +16,7 @@ export async function POST(req: Request) {
     .eq("script_tag_id", scriptTagId)
     .single()
 
-  if (!project) return NextResponse.json({ error: "Not found" }, { status: 404 })
+  if (!project) return corsResponse({ error: "Not found" }, { status: 404 })
 
   const githubToken = (project.companies as any).github_token
   const sandbox = await Sandbox.connect(sandboxId)
@@ -35,7 +37,7 @@ export async function POST(req: Request) {
   const changedPaths = fileEntries.map(e => e.path)
 
   if (changedPaths.length === 0) {
-    return NextResponse.json({ error: "No changes to submit" }, { status: 400 })
+    return corsResponse({ error: "No changes to submit" }, { status: 400 })
   }
 
   const { data: baseRef } = await octokit.git.getRef({
@@ -112,5 +114,5 @@ ${diff}
 
   await sandbox.kill()
 
-  return NextResponse.json({ prUrl: pr.html_url })
+  return corsResponse({ prUrl: pr.html_url })
 }

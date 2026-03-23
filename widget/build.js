@@ -10,7 +10,11 @@ esbuild.build({
   target: ["es2020"],
   define: {
     "process.env.API_URL": JSON.stringify(
-      process.env.API_URL || "http://localhost:3000"
+      process.env.API_URL ||
+        process.env.NEXT_PUBLIC_APP_URL ||
+        (process.env.VERCEL_PROJECT_PRODUCTION_URL
+          ? `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}`
+          : "http://localhost:3000")
     ),
   },
 }).catch(() => process.exit(1))

@@ -1,5 +1,7 @@
 import { Sandbox } from "@e2b/code-interpreter"
-import { NextResponse } from "next/server"
+import { corsResponse, corsOptions } from "@/lib/cors"
+
+export function OPTIONS() { return corsOptions() }
 
 export async function DELETE(
   req: Request,
@@ -12,5 +14,5 @@ export async function DELETE(
   } catch {
     // Already dead — fine
   }
-  return NextResponse.json({ success: true })
+  return corsResponse({ success: true })
 }

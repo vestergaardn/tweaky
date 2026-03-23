@@ -1,8 +1,10 @@
 import { Sandbox } from "@e2b/code-interpreter"
 import Anthropic from "@anthropic-ai/sdk"
-import { NextResponse } from "next/server"
+import { corsResponse, corsOptions } from "@/lib/cors"
 
 export const maxDuration = 60
+
+export function OPTIONS() { return corsOptions() }
 
 const anthropic = new Anthropic()
 
@@ -51,14 +53,14 @@ Example:
   try {
     changedFiles = JSON.parse(text).files ?? []
   } catch {
-    return NextResponse.json({ error: "LLM returned invalid response" }, { status: 500 })
+    return corsResponse({ error: "LLM returned invalid response" }, { status: 500 })
   }
 
   for (const file of changedFiles) {
     await sandbox.files.write(`/app/${file.path}`, file.content)
   }
 
-  return NextResponse.json({
+  return corsResponse({
     success: true,
     changedFiles: changedFiles.map((f) => f.path),
   })

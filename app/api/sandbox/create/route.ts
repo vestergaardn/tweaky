@@ -1,10 +1,12 @@
 import { Sandbox } from "@e2b/code-interpreter"
 import { getSupabaseAdmin } from "@/lib/supabase"
 import { decrypt } from "@/lib/crypto"
-import { NextResponse } from "next/server"
+import { corsResponse, corsOptions } from "@/lib/cors"
 import path from "path"
 
 export const maxDuration = 120
+
+export function OPTIONS() { return corsOptions() }
 
 export async function POST(req: Request) {
   const { scriptTagId } = await req.json()
@@ -17,7 +19,7 @@ export async function POST(req: Request) {
     .eq("script_tag_id", scriptTagId)
     .single()
 
-  if (!project) return NextResponse.json({ error: "Not found" }, { status: 404 })
+  if (!project) return corsResponse({ error: "Not found" }, { status: 404 })
 
   // Fetch and decrypt env vars for this project
   const { data: envVarRows } = await supabase
@@ -43,7 +45,7 @@ export async function POST(req: Request) {
   if (envString) {
     const envPath = path.resolve("/app", project.env_file_path ?? ".env")
     if (!envPath.startsWith("/app/")) {
-      return NextResponse.json({ error: "Invalid env file path" }, { status: 400 })
+      return corsResponse({ error: "Invalid env file path" }, { status: 400 })
     }
     await sandbox.files.write(envPath, envString)
   }
@@ -58,7 +60,7 @@ export async function POST(req: Request) {
   const previewHost = sandbox.getHost(project.dev_port)
   const previewUrl = `https://${previewHost}`
 
-  return NextResponse.json({
+  return corsResponse({
     sandboxId: sandbox.sandboxId,
     previewUrl,
   })
