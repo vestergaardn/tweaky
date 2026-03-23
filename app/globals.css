@@ -25,12 +25,12 @@ a {
 
 .gradient-btn {
   background: radial-gradient(
-    ellipse 130% 200% at 0% 50%,
+    ellipse 96.93% 192.71% at 0% 50%,
     #08512B 0%,
-    #0F64B5 20%,
-    #D13FF9 40%,
-    #F7451F 60%,
-    #F97183 80%
+    #0F64B5 25%,
+    #D13FF9 50%,
+    #F7451F 70%,
+    #F97183 100%
   );
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
 }

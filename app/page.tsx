@@ -7,32 +7,35 @@ export default async function Home() {
   if (session) redirect("/dashboard")
 
   return (
-    <div className="min-h-screen bg-background flex flex-col items-center justify-center overflow-hidden">
-      <div className="flex items-center gap-2 mb-6">
-        <span className="text-medium text-3xl font-bold leading-10">
-          Introducing
-        </span>
-        <Image src="/Group 1.svg" alt="Tweaky" width={122} height={37} />
+    <div className="min-h-screen bg-background flex flex-col items-center overflow-hidden">
+      <div className="mt-[70px]">
+        <Image src="/Group 1.svg" alt="Tweaky" width={144} height={32} />
       </div>
 
-      <h1 className="max-w-[730px] text-center text-black text-6xl font-bold leading-tight">
-        Let users improve your application with zero access to code.
-      </h1>
+      <div className="flex flex-col items-center mt-[133px]">
+        <p className="text-center text-neutral-800 text-2xl font-medium">
+          Crowdsourced feature development
+        </p>
 
-      <form
-        action={async () => {
-          "use server"
-          await signIn("github")
-        }}
-        className="mt-12"
-      >
-        <button
-          type="submit"
-          className="gradient-btn px-10 py-4 text-white text-xl font-normal rounded-[500px]"
+        <h1 className="max-w-[730px] mt-4 text-center text-neutral-800 text-6xl font-bold leading-tight">
+          Let users improve your application with zero access to code.
+        </h1>
+
+        <form
+          action={async () => {
+            "use server"
+            await signIn("github")
+          }}
+          className="mt-8"
         >
-          Connect repo
-        </button>
-      </form>
+          <button
+            type="submit"
+            className="gradient-btn px-6 py-3.5 text-white text-1.5xl font-normal rounded-[500px]"
+          >
+            Connect repo
+          </button>
+        </form>
+      </div>
     </div>
   )
 }
