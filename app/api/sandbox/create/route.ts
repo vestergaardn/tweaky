@@ -49,10 +49,18 @@ export async function POST(req: Request) {
     }
 
     // Step 1: Clone repo
-    const cloneResult = await sandbox.commands.run(`git clone ${repoUrl} /app`)
-    if (cloneResult.exitCode !== 0) {
+    try {
+      const cloneResult = await sandbox.commands.run(`git clone ${repoUrl} /app`)
+      if (cloneResult.exitCode !== 0) {
+        console.error("[sandbox/create] Git clone failed:", cloneResult.stderr)
+        await sandbox.kill()
+        return corsResponse({ error: `Git clone failed: ${cloneResult.stderr.replace(/oauth2:[^@]+@/, "oauth2:***@")}` }, { status: 500 })
+      }
+    } catch (cloneErr) {
+      const msg = cloneErr instanceof Error ? cloneErr.message : String(cloneErr)
+      console.error("[sandbox/create] Git clone failed:", msg)
       await sandbox.kill()
-      return corsResponse({ error: `Git clone failed: ${cloneResult.stderr.replace(/oauth2:[^@]+@/, "oauth2:***@")}` }, { status: 500 })
+      return corsResponse({ error: `Git clone failed: ${msg.replace(/oauth2:[^@]+@/, "oauth2:***@")}` }, { status: 500 })
     }
 
     // Step 2: Write .env file (if the project has env vars)
@@ -66,10 +74,18 @@ export async function POST(req: Request) {
     }
 
     // Step 3: Install dependencies
-    const installResult = await sandbox.commands.run(project.install_command || "npm install", { cwd: "/app" })
-    if (installResult.exitCode !== 0) {
+    try {
+      const installResult = await sandbox.commands.run(project.install_command || "npm install", { cwd: "/app" })
+      if (installResult.exitCode !== 0) {
+        console.error("[sandbox/create] Install failed:", installResult.stderr)
+        await sandbox.kill()
+        return corsResponse({ error: `Install failed: ${installResult.stderr.slice(-500)}` }, { status: 500 })
+      }
+    } catch (installErr) {
+      const msg = installErr instanceof Error ? installErr.message : String(installErr)
+      console.error("[sandbox/create] Install failed:", msg)
       await sandbox.kill()
-      return corsResponse({ error: `Install failed: ${installResult.stderr.slice(-500)}` }, { status: 500 })
+      return corsResponse({ error: `Install failed: ${msg.slice(-500)}` }, { status: 500 })
     }
 
     // Step 4: Start dev server in background

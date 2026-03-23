@@ -11,81 +11,81 @@ export async function POST(req: Request) {
   try {
     const { sandboxId, scriptTagId, prompt, bountyAmount, userEmail } = await req.json()
 
-  const { data: project } = await getSupabaseAdmin()
-    .from("projects")
-    .select("*, companies(github_token)")
-    .eq("script_tag_id", scriptTagId)
-    .single()
+    const { data: project } = await getSupabaseAdmin()
+      .from("projects")
+      .select("*, companies(github_token)")
+      .eq("script_tag_id", scriptTagId)
+      .single()
 
-  if (!project) return corsResponse({ error: "Not found" }, { status: 404 })
+    if (!project) return corsResponse({ error: "Not found" }, { status: 404 })
 
-  const githubToken = (project.companies as any).github_token
-  const sandbox = await Sandbox.connect(sandboxId)
-  const octokit = new Octokit({ auth: githubToken })
-  const [owner, repo] = project.repo_full_name.split("/")
-  const branchName = `tweaky/${Date.now()}`
+    const githubToken = (project.companies as any).github_token
+    const sandbox = await Sandbox.connect(sandboxId)
+    const octokit = new Octokit({ auth: githubToken })
+    const [owner, repo] = project.repo_full_name.split("/")
+    const branchName = `tweaky/${Date.now()}`
 
-  await sandbox.commands.run("git add -A", { cwd: "/app" })
+    await sandbox.commands.run("git add -A", { cwd: "/app" })
 
-  const diffResult = await sandbox.commands.run("git diff --cached HEAD", { cwd: "/app" })
-  const diff = diffResult.stdout
+    const diffResult = await sandbox.commands.run("git diff --cached HEAD", { cwd: "/app" })
+    const diff = diffResult.stdout
 
-  const statusResult = await sandbox.commands.run("git diff --cached --name-status HEAD", { cwd: "/app" })
-  const fileEntries = statusResult.stdout.trim().split("\n").filter(Boolean).map((line: string) => {
-    const [status, ...pathParts] = line.split("\t")
-    return { status: status.trim(), path: pathParts.join("\t").trim() }
-  })
-  const changedPaths = fileEntries.map(e => e.path)
-
-  if (changedPaths.length === 0) {
-    return corsResponse({ error: "No changes to submit" }, { status: 400 })
-  }
-
-  const { data: baseRef } = await octokit.git.getRef({
-    owner, repo, ref: `heads/${project.default_branch}`,
-  })
-  const baseSha = baseRef.object.sha
-
-  const { data: baseCommit } = await octokit.git.getCommit({
-    owner, repo, commit_sha: baseSha,
-  })
-
-  const treeItems = await Promise.all(
-    fileEntries.map(async ({ status, path: filePath }) => {
-      if (status === "D") {
-        return { path: filePath, mode: "100644" as const, type: "blob" as const, sha: null }
-      }
-      const content = await sandbox.files.read(`/app/${filePath}`)
-      const { data: blob } = await octokit.git.createBlob({
-        owner, repo,
-        content: Buffer.from(content).toString("base64"),
-        encoding: "base64",
-      })
-      return { path: filePath, mode: "100644" as const, type: "blob" as const, sha: blob.sha }
+    const statusResult = await sandbox.commands.run("git diff --cached --name-status HEAD", { cwd: "/app" })
+    const fileEntries = statusResult.stdout.trim().split("\n").filter(Boolean).map((line: string) => {
+      const [status, ...pathParts] = line.split("\t")
+      return { status: status.trim(), path: pathParts.join("\t").trim() }
     })
-  )
+    const changedPaths = fileEntries.map(e => e.path)
 
-  const { data: newTree } = await octokit.git.createTree({
-    owner, repo, base_tree: baseCommit.tree.sha, tree: treeItems,
-  })
+    if (changedPaths.length === 0) {
+      return corsResponse({ error: "No changes to submit" }, { status: 400 })
+    }
 
-  const { data: newCommit } = await octokit.git.createCommit({
-    owner, repo,
-    message: `[Tweaky] ${prompt}`,
-    tree: newTree.sha,
-    parents: [baseSha],
-  })
+    const { data: baseRef } = await octokit.git.getRef({
+      owner, repo, ref: `heads/${project.default_branch}`,
+    })
+    const baseSha = baseRef.object.sha
 
-  await octokit.git.createRef({
-    owner, repo, ref: `refs/heads/${branchName}`, sha: newCommit.sha,
-  })
+    const { data: baseCommit } = await octokit.git.getCommit({
+      owner, repo, commit_sha: baseSha,
+    })
 
-  const { data: pr } = await octokit.pulls.create({
-    owner, repo,
-    title: `[Tweaky] ${prompt}`,
-    head: branchName,
-    base: project.default_branch,
-    body: `## Tweaky Submission
+    const treeItems = await Promise.all(
+      fileEntries.map(async ({ status, path: filePath }) => {
+        if (status === "D") {
+          return { path: filePath, mode: "100644" as const, type: "blob" as const, sha: null }
+        }
+        const content = await sandbox.files.read(`/app/${filePath}`)
+        const { data: blob } = await octokit.git.createBlob({
+          owner, repo,
+          content: Buffer.from(content).toString("base64"),
+          encoding: "base64",
+        })
+        return { path: filePath, mode: "100644" as const, type: "blob" as const, sha: blob.sha }
+      })
+    )
+
+    const { data: newTree } = await octokit.git.createTree({
+      owner, repo, base_tree: baseCommit.tree.sha, tree: treeItems,
+    })
+
+    const { data: newCommit } = await octokit.git.createCommit({
+      owner, repo,
+      message: `[Tweaky] ${prompt}`,
+      tree: newTree.sha,
+      parents: [baseSha],
+    })
+
+    await octokit.git.createRef({
+      owner, repo, ref: `refs/heads/${branchName}`, sha: newCommit.sha,
+    })
+
+    const { data: pr } = await octokit.pulls.create({
+      owner, repo,
+      title: `[Tweaky] ${prompt}`,
+      head: branchName,
+      base: project.default_branch,
+      body: `## Tweaky Submission
 
 **Request:** ${prompt}
 **Submitted by:** ${userEmail}
@@ -101,21 +101,21 @@ ${diff}
 
 ---
 *Generated by [Tweaky](https://tweaky.dev)*`,
-  })
+    })
 
-  await getSupabaseAdmin().from("submissions").insert({
-    project_id: project.id,
-    user_prompt: prompt,
-    user_email: userEmail,
-    bounty_amount: bountyAmount,
-    pr_url: pr.html_url,
-    pr_number: pr.number,
-    status: "pending",
-  })
+    await getSupabaseAdmin().from("submissions").insert({
+      project_id: project.id,
+      user_prompt: prompt,
+      user_email: userEmail,
+      bounty_amount: bountyAmount,
+      pr_url: pr.html_url,
+      pr_number: pr.number,
+      status: "pending",
+    })
 
-  await sandbox.kill()
+    await sandbox.kill()
 
-  return corsResponse({ prUrl: pr.html_url })
+    return corsResponse({ prUrl: pr.html_url })
   } catch (error) {
     console.error("[sandbox/submit] Error:", error)
     return corsResponse(
