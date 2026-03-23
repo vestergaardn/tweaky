@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev",
+    "dev": "npm run build:widget && next dev",
     "build:widget": "node widget/build.js",
     "build": "npm run build:widget && next build",
     "start": "next start",
