@@ -37,27 +37,28 @@ export async function POST(req: Request) {
       return corsResponse({ error: "GitHub token not configured" }, { status: 500 })
     }
 
-    // Step 1: Download repo tarball via GitHub API (avoids git clone inside sandbox)
+    // Step 1: Resolve GitHub tarball redirect URL (temporary CDN link, no auth needed)
     const [owner, repo] = project.repo_full_name.split("/")
     const branch = project.default_branch || "main"
-    let tarballBytes: ArrayBuffer
+    let tarballUrl: string
     try {
       const tarballRes = await fetch(
         `https://api.github.com/repos/${owner}/${repo}/tarball/${branch}`,
-        { headers: { Authorization: `Bearer ${githubToken}`, Accept: "application/vnd.github+json" }, redirect: "follow" },
+        { headers: { Authorization: `Bearer ${githubToken}`, Accept: "application/vnd.github+json" }, redirect: "manual" },
       )
-      if (!tarballRes.ok) {
+      const location = tarballRes.headers.get("location")
+      if (!location) {
         const body = await tarballRes.text().catch(() => "")
-        console.error("[sandbox/create] GitHub tarball download failed:", tarballRes.status, body)
+        console.error("[sandbox/create] GitHub tarball request failed:", tarballRes.status, body)
         return corsResponse(
           { error: `GitHub repo download failed (${tarballRes.status}): check token permissions and repo access` },
           { status: 500 },
         )
       }
-      tarballBytes = await tarballRes.arrayBuffer()
+      tarballUrl = location
     } catch (dlErr) {
       const msg = dlErr instanceof Error ? dlErr.message : String(dlErr)
-      console.error("[sandbox/create] GitHub tarball download failed:", msg)
+      console.error("[sandbox/create] GitHub tarball request failed:", msg)
       return corsResponse({ error: `GitHub repo download failed: ${msg}` }, { status: 500 })
     }
 
@@ -71,22 +72,22 @@ export async function POST(req: Request) {
       return corsResponse({ error: "Failed to create sandbox — check E2B_API_KEY" }, { status: 500 })
     }
 
-    // Upload tarball and extract into /app
+    // Download and extract tarball directly inside the sandbox (avoids binary transfer via files API)
     try {
-      await sandbox.files.write("/tmp/repo.tar.gz", tarballBytes)
       const extract = await sandbox.commands.run(
-        "mkdir -p /app && tar xzf /tmp/repo.tar.gz --strip-components=1 -C /app",
-        { timeoutMs: 60_000 },
+        `mkdir -p /app && curl -fsSL "$TARBALL_URL" | tar xz --strip-components=1 -C /app`,
+        { timeoutMs: 120_000, envs: { TARBALL_URL: tarballUrl } },
       )
       if (extract.exitCode !== 0) {
         const detail = (extract.stderr || extract.stdout || "unknown error").trim()
-        console.error("[sandbox/create] Tarball extract failed:", detail)
+        console.error("[sandbox/create] Repo extract failed:", detail)
         await sandbox.kill()
         return corsResponse({ error: `Repo extract failed: ${detail}` }, { status: 500 })
       }
-    } catch (extractErr) {
-      const msg = extractErr instanceof Error ? extractErr.message : String(extractErr)
-      console.error("[sandbox/create] Tarball extract failed:", msg)
+    } catch (extractErr: any) {
+      const detail = extractErr?.stderr || extractErr?.stdout || ""
+      const msg = detail.trim() || (extractErr instanceof Error ? extractErr.message : String(extractErr))
+      console.error("[sandbox/create] Repo extract failed:", msg)
       await sandbox.kill()
       return corsResponse({ error: `Repo extract failed: ${msg}` }, { status: 500 })
     }
@@ -119,8 +120,9 @@ export async function POST(req: Request) {
         await sandbox.kill()
         return corsResponse({ error: `Install failed: ${installResult.stderr.slice(-500)}` }, { status: 500 })
       }
-    } catch (installErr) {
-      const msg = installErr instanceof Error ? installErr.message : String(installErr)
+    } catch (installErr: any) {
+      const detail = installErr?.stderr || installErr?.stdout || ""
+      const msg = detail.trim() || (installErr instanceof Error ? installErr.message : String(installErr))
       console.error("[sandbox/create] Install failed:", msg)
       await sandbox.kill()
       return corsResponse({ error: `Install failed: ${msg.slice(-500)}` }, { status: 500 })
