@@ -16,8 +16,8 @@ export async function POST(req: Request) {
 
     // Read from both client and api directories
     const [clientFiles, apiFiles] = await Promise.all([
-      readSourceFiles(sandbox, "/app/client/src"),
-      readSourceFiles(sandbox, "/app/api"),
+      readSourceFiles(sandbox, "/home/user/app/client/src"),
+      readSourceFiles(sandbox, "/home/user/app/api"),
     ])
 
     const files = { ...clientFiles, ...apiFiles }
@@ -35,8 +35,8 @@ RULES:
 - Respond with ONLY a JSON object. No explanation. No markdown fences.
 - The JSON must have a "files" key: an array of {path, content} objects.
 - Only include files that need to change.
-- Frontend paths are relative to /app e.g. "client/src/components/Navbar.jsx"
-- Backend paths are relative to /app e.g. "api/routes/listing.js"
+- Frontend paths are relative to /home/user/app e.g. "client/src/components/Navbar.jsx"
+- Backend paths are relative to /home/user/app e.g. "api/routes/listing.js"
 - Preserve all existing functionality unrelated to the request.
 - When changing the API, update the frontend to match if needed, and vice versa.
 
@@ -58,7 +58,7 @@ Example:
     }
 
     for (const file of changedFiles) {
-      await sandbox.files.write(`/app/${file.path}`, file.content)
+      await sandbox.files.write(`/home/user/app/${file.path}`, file.content)
     }
 
     return corsResponse({
@@ -91,7 +91,7 @@ async function readSourceFiles(
       if (entry.type === "dir") {
         Object.assign(result, await readSourceFiles(sandbox, fullPath))
       } else if (/\.(tsx?|jsx?|css|json)$/.test(entry.name)) {
-        result[fullPath.replace("/app/", "")] = await sandbox.files.read(fullPath)
+        result[fullPath.replace("/home/user/app/", "")] = await sandbox.files.read(fullPath)
       }
     }
   } catch {

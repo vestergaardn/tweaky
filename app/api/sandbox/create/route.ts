@@ -37,27 +37,28 @@ export async function POST(req: Request) {
       return corsResponse({ error: "GitHub token not configured" }, { status: 500 })
     }
 
-    // Step 1: Download repo tarball via GitHub API (avoids git clone inside sandbox)
+    // Step 1: Resolve GitHub tarball redirect URL (temporary CDN link, no auth needed)
     const [owner, repo] = project.repo_full_name.split("/")
     const branch = project.default_branch || "main"
-    let tarballBytes: ArrayBuffer
+    let tarballUrl: string
     try {
       const tarballRes = await fetch(
         `https://api.github.com/repos/${owner}/${repo}/tarball/${branch}`,
-        { headers: { Authorization: `Bearer ${githubToken}`, Accept: "application/vnd.github+json" }, redirect: "follow" },
+        { headers: { Authorization: `Bearer ${githubToken}`, Accept: "application/vnd.github+json" }, redirect: "manual" },
       )
-      if (!tarballRes.ok) {
+      const location = tarballRes.headers.get("location")
+      if (!location) {
         const body = await tarballRes.text().catch(() => "")
-        console.error("[sandbox/create] GitHub tarball download failed:", tarballRes.status, body)
+        console.error("[sandbox/create] GitHub tarball request failed:", tarballRes.status, body)
         return corsResponse(
           { error: `GitHub repo download failed (${tarballRes.status}): check token permissions and repo access` },
           { status: 500 },
         )
       }
-      tarballBytes = await tarballRes.arrayBuffer()
+      tarballUrl = location
     } catch (dlErr) {
       const msg = dlErr instanceof Error ? dlErr.message : String(dlErr)
-      console.error("[sandbox/create] GitHub tarball download failed:", msg)
+      console.error("[sandbox/create] GitHub tarball request failed:", msg)
       return corsResponse({ error: `GitHub repo download failed: ${msg}` }, { status: 500 })
     }
 
@@ -71,22 +72,22 @@ export async function POST(req: Request) {
       return corsResponse({ error: "Failed to create sandbox — check E2B_API_KEY" }, { status: 500 })
     }
 
-    // Upload tarball and extract into /app
+    // Download and extract tarball directly inside the sandbox (avoids binary transfer via files API)
     try {
-      await sandbox.files.write("/tmp/repo.tar.gz", tarballBytes)
       const extract = await sandbox.commands.run(
-        "mkdir -p /app && tar xzf /tmp/repo.tar.gz --strip-components=1 -C /app",
-        { timeoutMs: 60_000 },
+        `set -o pipefail && mkdir -p /home/user/app && curl -fsSL "$TARBALL_URL" | tar xz --strip-components=1 -C /home/user/app && ls /home/user/app/ | grep -q .`,
+        { timeoutMs: 120_000, envs: { TARBALL_URL: tarballUrl } },
       )
       if (extract.exitCode !== 0) {
         const detail = (extract.stderr || extract.stdout || "unknown error").trim()
-        console.error("[sandbox/create] Tarball extract failed:", detail)
+        console.error("[sandbox/create] Repo extract failed:", detail)
         await sandbox.kill()
         return corsResponse({ error: `Repo extract failed: ${detail}` }, { status: 500 })
       }
-    } catch (extractErr) {
-      const msg = extractErr instanceof Error ? extractErr.message : String(extractErr)
-      console.error("[sandbox/create] Tarball extract failed:", msg)
+    } catch (extractErr: any) {
+      const detail = extractErr?.stderr || extractErr?.stdout || ""
+      const msg = detail.trim() || (extractErr instanceof Error ? extractErr.message : String(extractErr))
+      console.error("[sandbox/create] Repo extract failed:", msg)
       await sandbox.kill()
       return corsResponse({ error: `Repo extract failed: ${msg}` }, { status: 500 })
     }
@@ -94,7 +95,7 @@ export async function POST(req: Request) {
     // Init a git repo so the submit route can use git diff to detect changes
     try {
       await sandbox.commands.run(
-        'cd /app && git init && git add -A && git commit -m "initial"',
+        'cd /home/user/app && git init && git add -A && git commit -m "initial"',
         { timeoutMs: 60_000 },
       )
     } catch {
@@ -103,8 +104,8 @@ export async function POST(req: Request) {
 
     // Step 2: Write .env file (if the project has env vars)
     if (envString) {
-      const envPath = path.resolve("/app", project.env_file_path ?? ".env")
-      if (!envPath.startsWith("/app/")) {
+      const envPath = path.resolve("/home/user/app", project.env_file_path ?? ".env")
+      if (!envPath.startsWith("/home/user/app/")) {
         await sandbox.kill()
         return corsResponse({ error: "Invalid env file path" }, { status: 400 })
       }
@@ -113,21 +114,22 @@ export async function POST(req: Request) {
 
     // Step 3: Install dependencies
     try {
-      const installResult = await sandbox.commands.run(project.install_command || "npm install", { cwd: "/app", timeoutMs: 120_000 })
+      const installResult = await sandbox.commands.run(project.install_command || "npm install", { cwd: "/home/user/app", timeoutMs: 120_000 })
       if (installResult.exitCode !== 0) {
         console.error("[sandbox/create] Install failed:", installResult.stderr)
         await sandbox.kill()
         return corsResponse({ error: `Install failed: ${installResult.stderr.slice(-500)}` }, { status: 500 })
       }
-    } catch (installErr) {
-      const msg = installErr instanceof Error ? installErr.message : String(installErr)
+    } catch (installErr: any) {
+      const detail = installErr?.stderr || installErr?.stdout || ""
+      const msg = detail.trim() || (installErr instanceof Error ? installErr.message : String(installErr))
       console.error("[sandbox/create] Install failed:", msg)
       await sandbox.kill()
       return corsResponse({ error: `Install failed: ${msg.slice(-500)}` }, { status: 500 })
     }
 
     // Step 4: Start dev server in background
-    sandbox.commands.run(project.dev_command || "npm run dev", { cwd: "/app", background: true })
+    sandbox.commands.run(project.dev_command || "npm run dev", { cwd: "/home/user/app", background: true })
     await new Promise((r) => setTimeout(r, 5000))
 
     const previewHost = sandbox.getHost(project.dev_port ?? 3000)
