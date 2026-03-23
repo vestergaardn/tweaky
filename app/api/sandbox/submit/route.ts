@@ -25,12 +25,12 @@ export async function POST(req: Request) {
     const [owner, repo] = project.repo_full_name.split("/")
     const branchName = `tweaky/${Date.now()}`
 
-    await sandbox.commands.run("git add -A", { cwd: "/app" })
+    await sandbox.commands.run("git add -A", { cwd: "/home/user/app" })
 
-    const diffResult = await sandbox.commands.run("git diff --cached HEAD", { cwd: "/app" })
+    const diffResult = await sandbox.commands.run("git diff --cached HEAD", { cwd: "/home/user/app" })
     const diff = diffResult.stdout
 
-    const statusResult = await sandbox.commands.run("git diff --cached --name-status HEAD", { cwd: "/app" })
+    const statusResult = await sandbox.commands.run("git diff --cached --name-status HEAD", { cwd: "/home/user/app" })
     const fileEntries = statusResult.stdout.trim().split("\n").filter(Boolean).map((line: string) => {
       const [status, ...pathParts] = line.split("\t")
       return { status: status.trim(), path: pathParts.join("\t").trim() }
@@ -55,7 +55,7 @@ export async function POST(req: Request) {
         if (status === "D") {
           return { path: filePath, mode: "100644" as const, type: "blob" as const, sha: null }
         }
-        const content = await sandbox.files.read(`/app/${filePath}`)
+        const content = await sandbox.files.read(`/home/user/app/${filePath}`)
         const { data: blob } = await octokit.git.createBlob({
           owner, repo,
           content: Buffer.from(content).toString("base64"),

@@ -75,7 +75,7 @@ export async function POST(req: Request) {
     // Download and extract tarball directly inside the sandbox (avoids binary transfer via files API)
     try {
       const extract = await sandbox.commands.run(
-        `mkdir -p /app && curl -fsSL "$TARBALL_URL" | tar xz --strip-components=1 -C /app`,
+        `mkdir -p /home/user/app && curl -fsSL "$TARBALL_URL" | tar xz --strip-components=1 -C /home/user/app`,
         { timeoutMs: 120_000, envs: { TARBALL_URL: tarballUrl } },
       )
       if (extract.exitCode !== 0) {
@@ -95,7 +95,7 @@ export async function POST(req: Request) {
     // Init a git repo so the submit route can use git diff to detect changes
     try {
       await sandbox.commands.run(
-        'cd /app && git init && git add -A && git commit -m "initial"',
+        'cd /home/user/app && git init && git add -A && git commit -m "initial"',
         { timeoutMs: 60_000 },
       )
     } catch {
@@ -104,8 +104,8 @@ export async function POST(req: Request) {
 
     // Step 2: Write .env file (if the project has env vars)
     if (envString) {
-      const envPath = path.resolve("/app", project.env_file_path ?? ".env")
-      if (!envPath.startsWith("/app/")) {
+      const envPath = path.resolve("/home/user/app", project.env_file_path ?? ".env")
+      if (!envPath.startsWith("/home/user/app/")) {
         await sandbox.kill()
         return corsResponse({ error: "Invalid env file path" }, { status: 400 })
       }
@@ -114,7 +114,7 @@ export async function POST(req: Request) {
 
     // Step 3: Install dependencies
     try {
-      const installResult = await sandbox.commands.run(project.install_command || "npm install", { cwd: "/app", timeoutMs: 120_000 })
+      const installResult = await sandbox.commands.run(project.install_command || "npm install", { cwd: "/home/user/app", timeoutMs: 120_000 })
       if (installResult.exitCode !== 0) {
         console.error("[sandbox/create] Install failed:", installResult.stderr)
         await sandbox.kill()
@@ -129,7 +129,7 @@ export async function POST(req: Request) {
     }
 
     // Step 4: Start dev server in background
-    sandbox.commands.run(project.dev_command || "npm run dev", { cwd: "/app", background: true })
+    sandbox.commands.run(project.dev_command || "npm run dev", { cwd: "/home/user/app", background: true })
     await new Promise((r) => setTimeout(r, 5000))
 
     const previewHost = sandbox.getHost(project.dev_port ?? 3000)
