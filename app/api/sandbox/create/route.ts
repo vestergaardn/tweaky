@@ -40,7 +40,7 @@ export async function POST(req: Request) {
     // Step 1: Download repo tarball via GitHub API (avoids git clone inside sandbox)
     const [owner, repo] = project.repo_full_name.split("/")
     const branch = project.default_branch || "main"
-    let tarballBytes: Buffer
+    let tarballBytes: ArrayBuffer
     try {
       const tarballRes = await fetch(
         `https://api.github.com/repos/${owner}/${repo}/tarball/${branch}`,
@@ -54,7 +54,7 @@ export async function POST(req: Request) {
           { status: 500 },
         )
       }
-      tarballBytes = Buffer.from(await tarballRes.arrayBuffer())
+      tarballBytes = await tarballRes.arrayBuffer()
     } catch (dlErr) {
       const msg = dlErr instanceof Error ? dlErr.message : String(dlErr)
       console.error("[sandbox/create] GitHub tarball download failed:", msg)
