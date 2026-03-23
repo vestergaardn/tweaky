@@ -11,7 +11,10 @@ export async function callCreateSandbox(projectId) {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ scriptTagId: projectId }),
   })
-  if (!res.ok) throw new Error("Failed to create sandbox")
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}))
+    throw new Error(body.error || "Failed to create sandbox")
+  }
   return res.json()
 }
 

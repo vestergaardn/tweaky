@@ -264,7 +264,11 @@ export function openOverlay(projectId, onClose) {
       sendBtn.disabled = false
       setStatus("Ready \u2014 the app is running live. Describe a change below.")
     } catch (err) {
-      setStatus("Failed to start sandbox. Please close and try again.")
+      loading.innerHTML = `
+        <div style="color:#ef4444;font-size:20px;margin-bottom:4px;">\u2716</div>
+        <span style="color:#71717a;">Failed to start sandbox. Please close and try again.</span>
+      `
+      setStatus("Something went wrong.")
       console.error("[Tweaky]", err)
     }
   })()
