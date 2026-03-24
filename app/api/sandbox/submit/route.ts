@@ -8,6 +8,7 @@ export const maxDuration = 60
 export function OPTIONS() { return corsOptions() }
 
 export async function POST(req: Request) {
+  let sandbox: Awaited<ReturnType<typeof Sandbox.connect>> | undefined
   try {
     const { sandboxId, scriptTagId, prompt, bountyAmount, userEmail } = await req.json()
 
@@ -20,17 +21,27 @@ export async function POST(req: Request) {
     if (!project) return corsResponse({ error: "Not found" }, { status: 404 })
 
     const githubToken = (project.companies as any).github_token
-    const sandbox = await Sandbox.connect(sandboxId)
+    sandbox = await Sandbox.connect(sandboxId)
     const octokit = new Octokit({ auth: githubToken })
     const [owner, repo] = project.repo_full_name.split("/")
     const branchName = `tweaky/${Date.now()}`
 
-    await sandbox.commands.run("git add -A", { cwd: "/home/user/app" })
+    // Detect app directory (same logic as create route — find where .git was initialized)
+    let appDir = "/home/user/app"
+    try {
+      const gitDirCheck = await sandbox.commands.run(
+        'git -C /home/user/app rev-parse --show-toplevel 2>/dev/null || find /home/user/app -maxdepth 2 -name .git -type d | head -1 | xargs dirname 2>/dev/null || echo /home/user/app',
+        { timeoutMs: 5_000 },
+      )
+      appDir = (gitDirCheck.stdout || "").trim() || "/home/user/app"
+    } catch { /* fallback to default */ }
 
-    const diffResult = await sandbox.commands.run("git diff --cached HEAD", { cwd: "/home/user/app" })
+    await sandbox.commands.run(`cd ${appDir} && git add -A`, { timeoutMs: 30_000 })
+
+    const diffResult = await sandbox.commands.run(`cd ${appDir} && git diff --cached HEAD`, { timeoutMs: 30_000 })
     const diff = diffResult.stdout
 
-    const statusResult = await sandbox.commands.run("git diff --cached --name-status HEAD", { cwd: "/home/user/app" })
+    const statusResult = await sandbox.commands.run(`cd ${appDir} && git diff --cached --name-status HEAD`, { timeoutMs: 30_000 })
     const fileEntries = statusResult.stdout.trim().split("\n").filter(Boolean).map((line: string) => {
       const [status, ...pathParts] = line.split("\t")
       return { status: status.trim(), path: pathParts.join("\t").trim() }
@@ -55,7 +66,7 @@ export async function POST(req: Request) {
         if (status === "D") {
           return { path: filePath, mode: "100644" as const, type: "blob" as const, sha: null }
         }
-        const content = await sandbox.files.read(`/home/user/app/${filePath}`)
+        const content = await sandbox!.files.read(`${appDir}/${filePath}`)
         const { data: blob } = await octokit.git.createBlob({
           owner, repo,
           content: Buffer.from(content).toString("base64"),
@@ -118,6 +129,9 @@ ${diff}
     return corsResponse({ prUrl: pr.html_url })
   } catch (error) {
     console.error("[sandbox/submit] Error:", error)
+    if (sandbox) {
+      try { await sandbox.kill() } catch { /* best effort */ }
+    }
     return corsResponse(
       { error: error instanceof Error ? error.message : "Internal server error" },
       { status: 500 },

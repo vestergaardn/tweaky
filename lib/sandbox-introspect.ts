@@ -68,13 +68,14 @@ export function parseIntrospection(stdout: string): ProjectInfo {
 
 export async function discoverSourceFiles(
   sandbox: Sandbox,
+  appDir = "/home/user/app",
 ): Promise<Record<string, string>> {
   const skipArgs = [...SKIP_DIRS]
     .flatMap((d) => ["-not", "-path", `*/${d}/*`])
     .join(" ")
 
   const findResult = await sandbox.commands.run(
-    `find /home/user/app -maxdepth 8 -type f ${skipArgs} | head -500`,
+    `find ${appDir} -maxdepth 8 -type f ${skipArgs} | head -500`,
     { timeoutMs: 10_000 },
   )
 
@@ -103,7 +104,7 @@ export async function discoverSourceFiles(
     try {
       const content = await sandbox.files.read(fullPath)
       totalBytes += content.length
-      const relPath = fullPath.replace("/home/user/app/", "")
+      const relPath = fullPath.replace(`${appDir}/`, "")
       result[relPath] = content
     } catch {
       // File unreadable — skip
