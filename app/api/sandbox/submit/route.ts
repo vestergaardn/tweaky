@@ -82,20 +82,11 @@ export async function POST(req: Request) {
     }
 
     // Push changes to GitHub via git protocol instead of REST API.
-    // This avoids the blob/tree/commit/ref API calls that consume rate limits.
-    // The only REST API call needed is PR creation (1 call instead of 5+N).
+    // The sandbox has an unrelated git history (tarball extract → git init), so we
+    // cannot rebase onto origin. Instead: fetch origin, create a branch from it,
+    // apply the user's diff, commit, and push.
     const commitMessage = `[Tweaky] ${prompt}`
     try {
-      // Commit the user's changes locally
-      await sandbox.git.commit(appDir, commitMessage, {
-        authorName: "Tweaky",
-        authorEmail: "bot@tweaky.dev",
-        timeoutMs: 30_000,
-      })
-
-      // Save the diff to a file for fallback conflict resolution
-      await sandbox.files.write(`${appDir}/.tweaky-diff.patch`, diff)
-
       // Add GitHub remote with token auth and fetch the default branch
       const remoteUrl = `https://x-access-token:${githubToken}@github.com/${owner}/${repo}.git`
       await sandbox.git.remoteAdd(appDir, "origin", remoteUrl, {
@@ -113,29 +104,25 @@ export async function POST(req: Request) {
         return corsResponse({ error: "Failed to fetch from GitHub repository" }, { status: 500 })
       }
 
-      // Rebase our commit(s) on top of the remote default branch so history is clean.
-      // commands.run throws CommandExitError on non-zero exit, so we catch to handle conflicts.
-      let rebaseOk = false
+      // Save the diff as a patch file outside the repo (checkout will overwrite the working tree)
+      const patchPath = "/tmp/tweaky-submit.patch"
+      await sandbox.files.write(patchPath, diff)
+
+      // Create a new branch from the real upstream and apply the user's diff
+      await sandbox.commands.run(
+        `cd ${appDir} && git checkout -b ${branchName} origin/${defaultBranch}`,
+        { timeoutMs: 10_000 },
+      )
       try {
         await sandbox.commands.run(
-          `cd ${appDir} && git rebase origin/${defaultBranch}`,
-          { timeoutMs: 60_000 },
+          `cd ${appDir} && git apply --index ${patchPath}`,
+          { timeoutMs: 30_000 },
         )
-        rebaseOk = true
       } catch {
-        // Rebase failed (likely conflicts) — will apply diff on a fresh branch below
-      }
-
-      if (!rebaseOk) {
-        // Abort the failed rebase and apply the diff on a fresh branch from upstream
-        try { await sandbox.commands.run(`cd ${appDir} && git rebase --abort`, { timeoutMs: 10_000 }) } catch { /* may already be aborted */ }
-        await sandbox.commands.run(
-          `cd ${appDir} && git checkout -b ${branchName} origin/${defaultBranch}`,
-          { timeoutMs: 10_000 },
-        )
+        // --index failed, try with --3way for fuzzy matching
         try {
           await sandbox.commands.run(
-            `cd ${appDir} && git apply --index --3way .tweaky-diff.patch`,
+            `cd ${appDir} && git apply --index --3way ${patchPath}`,
             { timeoutMs: 30_000 },
           )
         } catch (e) {
@@ -145,17 +132,15 @@ export async function POST(req: Request) {
             { status: 409 },
           )
         }
-        await sandbox.git.commit(appDir, commitMessage, {
-          authorName: "Tweaky",
-          authorEmail: "bot@tweaky.dev",
-          timeoutMs: 30_000,
-        })
-      } else {
-        // Rebase succeeded — create the branch name at HEAD
-        await sandbox.git.createBranch(appDir, branchName, { timeoutMs: 10_000 })
       }
 
-      // Push the branch to GitHub via git protocol (no REST API rate limit impact)
+      await sandbox.git.commit(appDir, commitMessage, {
+        authorName: "Tweaky",
+        authorEmail: "bot@tweaky.dev",
+        timeoutMs: 30_000,
+      })
+
+      // Push the branch to GitHub
       try {
         await sandbox.git.push(appDir, {
           remote: "origin",
