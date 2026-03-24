@@ -35,19 +35,35 @@ export async function POST(req: Request) {
       model: "claude-sonnet-4-5",
       max_tokens: 8192,
       system: buildSystemPrompt(projectInfo, filePaths),
-      messages: [{
-        role: "user",
-        content: `Source code:\n\n${JSON.stringify(files, null, 2)}\n\nRequest: ${prompt}`,
-      }],
+      messages: [
+        {
+          role: "user",
+          content: `Source code:\n\n${JSON.stringify(files, null, 2)}\n\nRequest: ${prompt}`,
+        },
+        {
+          role: "assistant",
+          content: "{",
+        },
+      ],
     })
 
-    const text = message.content[0].type === "text" ? message.content[0].text : ""
+    const rawText = message.content[0].type === "text" ? message.content[0].text : ""
+    // Prepend the prefilled "{", but skip if the model repeated it
+    const text = rawText.trimStart().startsWith("{") ? rawText.trimStart() : "{" + rawText
 
     let changedFiles: { path: string; content: string }[] = []
     try {
       changedFiles = JSON.parse(text).files ?? []
     } catch {
-      return corsResponse({ error: "LLM returned invalid response" }, { status: 500 })
+      // LLM may wrap JSON in markdown fences — strip them and retry
+      const fenceMatch = text.match(/```(?:json)?\s*\n?([\s\S]*?)\n?\s*```/)
+      const stripped = fenceMatch ? fenceMatch[1].trim() : text.trim()
+      try {
+        changedFiles = JSON.parse(stripped).files ?? []
+      } catch {
+        console.error("[sandbox/prompt] Failed to parse LLM response:", text.slice(0, 500))
+        return corsResponse({ error: "LLM returned invalid response" }, { status: 500 })
+      }
     }
 
     for (const file of changedFiles) {
