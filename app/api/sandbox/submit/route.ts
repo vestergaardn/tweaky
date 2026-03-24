@@ -47,9 +47,9 @@ export async function POST(req: Request) {
       )
     }
 
-    const octokit = new Octokit({ auth: githubToken })
     const [owner, repo] = project.repo_full_name.split("/")
     const branchName = `tweaky/${Date.now()}`
+    const defaultBranch = project.default_branch || "main"
 
     // Detect app directory (same logic as create route — find where .git was initialized)
     let appDir = "/home/user/app"
@@ -61,94 +61,99 @@ export async function POST(req: Request) {
       appDir = (gitDirCheck.stdout || "").trim() || "/home/user/app"
     } catch { /* fallback to default */ }
 
+    // Stage all changes and capture the diff before modifying git state
     await sandbox.commands.run(`cd ${appDir} && git add -A`, { timeoutMs: 30_000 })
 
     const diffResult = await sandbox.commands.run(`cd ${appDir} && git diff --cached HEAD`, { timeoutMs: 30_000 })
     const diff = diffResult.stdout
 
     const statusResult = await sandbox.commands.run(`cd ${appDir} && git diff --cached --name-status HEAD`, { timeoutMs: 30_000 })
-    const fileEntries = statusResult.stdout.trim().split("\n").filter(Boolean).map((line: string) => {
-      const [status, ...pathParts] = line.split("\t")
-      return { status: status.trim(), path: pathParts.join("\t").trim() }
-    })
-    const changedPaths = fileEntries.map(e => e.path)
+    const changedFiles = statusResult.stdout.trim().split("\n").filter(Boolean)
 
-    if (changedPaths.length === 0) {
+    if (changedFiles.length === 0) {
       return corsResponse({ error: "No changes to submit" }, { status: 400 })
     }
 
-    // Fetch base branch ref from GitHub
-    let baseSha: string
-    let baseTreeSha: string
+    // Push changes to GitHub via git protocol instead of REST API.
+    // This avoids the blob/tree/commit/ref API calls that consume rate limits.
+    // The only REST API call needed is PR creation (1 call instead of 5+N).
     try {
-      const { data: baseRef } = await octokit.git.getRef({
-        owner, repo, ref: `heads/${project.default_branch}`,
-      })
-      baseSha = baseRef.object.sha
+      // Commit the user's changes locally
+      await sandbox.git.commit(appDir, `[Tweaky] ${prompt}`)
 
-      const { data: baseCommit } = await octokit.git.getCommit({
-        owner, repo, commit_sha: baseSha,
-      })
-      baseTreeSha = baseCommit.tree.sha
-    } catch (e: any) {
-      const detail = e?.response?.data?.message || e?.message || String(e)
-      console.error("[sandbox/submit] GitHub base ref fetch failed:", detail, e)
-      return corsResponse(
-        { error: `Failed to fetch base branch from GitHub: ${detail}` },
-        { status: 500 },
+      // Save the diff to a file for fallback conflict resolution
+      await sandbox.files.write(`${appDir}/.tweaky-diff.patch`, diff)
+
+      // Add GitHub remote with token auth and fetch the default branch
+      const remoteUrl = `https://x-access-token:${githubToken}@github.com/${owner}/${repo}.git`
+      await sandbox.git.remoteAdd(appDir, "origin", remoteUrl)
+      const fetchResult = await sandbox.commands.run(
+        `cd ${appDir} && git fetch origin ${defaultBranch}`,
+        { timeoutMs: 60_000 },
       )
-    }
+      if (fetchResult.exitCode !== 0) {
+        console.error("[sandbox/submit] git fetch failed:", fetchResult.stderr)
+        return corsResponse({ error: "Failed to fetch from GitHub repository" }, { status: 500 })
+      }
 
-    // Read changed files from sandbox and create GitHub blobs.
-    // Files are read sequentially to avoid overwhelming the sandbox connection limit
-    // (the dev server's HMR WebSocket already consumes many of the 1000 allowed connections).
-    const treeItems: Array<{ path: string; mode: "100644"; type: "blob"; sha: string | null }> = []
-    try {
-      for (const { status, path: filePath } of fileEntries) {
-        if (status === "D") {
-          treeItems.push({ path: filePath, mode: "100644" as const, type: "blob" as const, sha: null })
-          continue
+      // Rebase our commit(s) on top of the remote default branch so history is clean
+      const rebaseResult = await sandbox.commands.run(
+        `cd ${appDir} && git rebase origin/${defaultBranch}`,
+        { timeoutMs: 60_000 },
+      )
+      if (rebaseResult.exitCode !== 0) {
+        // Rebase failed (conflicts) — abort and apply diff on a fresh branch instead
+        await sandbox.commands.run(`cd ${appDir} && git rebase --abort`, { timeoutMs: 10_000 })
+        await sandbox.commands.run(
+          `cd ${appDir} && git checkout -b ${branchName} origin/${defaultBranch}`,
+          { timeoutMs: 10_000 },
+        )
+        const applyResult = await sandbox.commands.run(
+          `cd ${appDir} && git apply --index --3way .tweaky-diff.patch`,
+          { timeoutMs: 30_000 },
+        )
+        if (applyResult.exitCode !== 0) {
+          console.error("[sandbox/submit] git apply failed:", applyResult.stderr)
+          return corsResponse(
+            { error: "Changes conflict with the latest version of the codebase. Please try again." },
+            { status: 409 },
+          )
         }
+        await sandbox.git.commit(appDir, `[Tweaky] ${prompt}`)
+      } else {
+        // Rebase succeeded — create the branch name at HEAD
+        await sandbox.commands.run(
+          `cd ${appDir} && git checkout -b ${branchName}`,
+          { timeoutMs: 10_000 },
+        )
+      }
 
-        const content = await sandbox!.files.read(`${appDir}/${filePath}`)
-        const { data: blob } = await octokit.git.createBlob({
-          owner, repo,
-          content: Buffer.from(content).toString("base64"),
-          encoding: "base64",
-        })
-        treeItems.push({ path: filePath, mode: "100644" as const, type: "blob" as const, sha: blob.sha })
+      // Push the branch to GitHub via git protocol (no REST API rate limit impact)
+      const pushResult = await sandbox.git.push(appDir, {
+        remote: "origin",
+        branch: branchName,
+        username: "x-access-token",
+        password: githubToken,
+        timeoutMs: 60_000,
+      })
+      if (pushResult.exitCode !== 0) {
+        console.error("[sandbox/submit] git push failed:", pushResult.stderr)
+        return corsResponse({ error: "Failed to push changes to GitHub" }, { status: 500 })
       }
     } catch (e) {
-      console.error("[sandbox/submit] File read or blob creation failed:", e)
+      console.error("[sandbox/submit] Git operations failed:", e)
       const msg = e instanceof Error ? e.message : String(e)
-      return corsResponse(
-        { error: `Failed to read files or create GitHub blobs: ${msg.slice(-300)}` },
-        { status: 500 },
-      )
+      return corsResponse({ error: `Failed to push changes: ${msg}` }, { status: 500 })
     }
 
-    // Create tree, commit, branch, and PR on GitHub
+    // Create the PR — this is the only GitHub REST API call needed
     try {
-      const { data: newTree } = await octokit.git.createTree({
-        owner, repo, base_tree: baseTreeSha, tree: treeItems,
-      })
-
-      const { data: newCommit } = await octokit.git.createCommit({
-        owner, repo,
-        message: `[Tweaky] ${prompt}`,
-        tree: newTree.sha,
-        parents: [baseSha],
-      })
-
-      await octokit.git.createRef({
-        owner, repo, ref: `refs/heads/${branchName}`, sha: newCommit.sha,
-      })
-
+      const octokit = new Octokit({ auth: githubToken })
       const { data: pr } = await octokit.pulls.create({
         owner, repo,
         title: `[Tweaky] ${prompt}`,
         head: branchName,
-        base: project.default_branch,
+        base: defaultBranch,
         body: `## Tweaky Submission
 
 **Request:** ${prompt}
