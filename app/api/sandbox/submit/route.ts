@@ -97,20 +97,24 @@ export async function POST(req: Request) {
     // 4. Commit and push
     const commitMessage = `[Tweaky] ${prompt}`
     try {
-      // Save changed files to /tmp before switching branches (checkout overwrites working tree)
-      const tmpDir = "/tmp/tweaky-files"
-      await sandbox.commands.run(`rm -rf ${tmpDir} && mkdir -p ${tmpDir}`, { timeoutMs: 5_000 })
-      for (const entry of changedEntries) {
-        if (entry.status === "D") continue // deleted files — handled after checkout
-        // Preserve directory structure under /tmp/tweaky-files
-        const dirPart = entry.file.includes("/") ? entry.file.substring(0, entry.file.lastIndexOf("/")) : ""
-        if (dirPart) {
-          await sandbox.commands.run(`mkdir -p ${tmpDir}/${dirPart}`, { timeoutMs: 5_000 })
-        }
-        await sandbox.commands.run(`cp "${appDir}/${entry.file}" "${tmpDir}/${entry.file}"`, { timeoutMs: 10_000 })
+      // Build file lists for batch operations (avoids per-file round-trips to E2B)
+      const filesToCopy = changedEntries.filter((e) => e.status !== "D").map((e) => e.file)
+      const filesToDelete = changedEntries.filter((e) => e.status === "D").map((e) => e.file)
+      const oldRenamedFiles = changedEntries.filter((e) => e.status === "R" && e.oldFile).map((e) => e.oldFile!)
+
+      // Save changed files to /tmp in one command using tar (preserves directory structure)
+      const tmpArchive = "/tmp/tweaky-files.tar"
+      if (filesToCopy.length > 0) {
+        // Write file list and use tar to archive them all at once
+        const fileListStr = filesToCopy.join("\n")
+        await sandbox.files.write("/tmp/tweaky-filelist.txt", fileListStr)
+        await sandbox.commands.run(
+          `cd ${appDir} && tar cf ${tmpArchive} -T /tmp/tweaky-filelist.txt`,
+          { timeoutMs: 30_000 },
+        )
       }
 
-      // Add GitHub remote with token auth and fetch the default branch
+      // Add GitHub remote, fetch, reset, and checkout — all in minimal round-trips
       const remoteUrl = `https://x-access-token:${githubToken}@github.com/${owner}/${repo}.git`
       await sandbox.git.remoteAdd(appDir, "origin", remoteUrl, {
         overwrite: true,
@@ -127,36 +131,24 @@ export async function POST(req: Request) {
         return corsResponse({ error: "Failed to fetch from GitHub repository" }, { status: 500 })
       }
 
-      // Reset the index so checkout doesn't conflict with staged changes
-      await sandbox.commands.run(`cd ${appDir} && git reset HEAD`, { timeoutMs: 10_000 })
-
-      // Create a new branch from upstream (force to discard local working tree)
+      // Reset staged changes and force-checkout a new branch from upstream
       await sandbox.commands.run(
-        `cd ${appDir} && git checkout -f -b ${branchName} origin/${defaultBranch}`,
+        `cd ${appDir} && git reset HEAD && git checkout -f -b ${branchName} origin/${defaultBranch}`,
         { timeoutMs: 10_000 },
       )
 
-      // Copy saved files back and handle deletions/renames
-      for (const entry of changedEntries) {
-        if (entry.status === "D") {
-          await sandbox.commands.run(`cd ${appDir} && rm -f "${entry.file}"`, { timeoutMs: 5_000 })
-        } else if (entry.status === "R" && entry.oldFile) {
-          // Rename: delete old path, copy new content
-          await sandbox.commands.run(`cd ${appDir} && rm -f "${entry.oldFile}"`, { timeoutMs: 5_000 })
-          const dirPart = entry.file.includes("/") ? entry.file.substring(0, entry.file.lastIndexOf("/")) : ""
-          if (dirPart) {
-            await sandbox.commands.run(`mkdir -p "${appDir}/${dirPart}"`, { timeoutMs: 5_000 })
-          }
-          await sandbox.commands.run(`cp "${tmpDir}/${entry.file}" "${appDir}/${entry.file}"`, { timeoutMs: 10_000 })
-        } else {
-          // Ensure parent directory exists (file may be new in a new directory)
-          const dirPart = entry.file.includes("/") ? entry.file.substring(0, entry.file.lastIndexOf("/")) : ""
-          if (dirPart) {
-            await sandbox.commands.run(`mkdir -p "${appDir}/${dirPart}"`, { timeoutMs: 5_000 })
-          }
-          await sandbox.commands.run(`cp "${tmpDir}/${entry.file}" "${appDir}/${entry.file}"`, { timeoutMs: 10_000 })
-        }
+      // Restore changed files from tar and handle deletions — all in one command
+      const restoreCmds: string[] = [`cd ${appDir}`]
+      if (filesToCopy.length > 0) {
+        restoreCmds.push(`tar xf ${tmpArchive}`)
       }
+      // Delete removed files and old paths from renames
+      const allDeletes = [...filesToDelete, ...oldRenamedFiles]
+      if (allDeletes.length > 0) {
+        const deleteArgs = allDeletes.map((f) => `"${f}"`).join(" ")
+        restoreCmds.push(`rm -f ${deleteArgs}`)
+      }
+      await sandbox.commands.run(restoreCmds.join(" && "), { timeoutMs: 30_000 })
 
       await sandbox.git.add(appDir, { all: true, timeoutMs: 30_000 })
       await sandbox.git.commit(appDir, commitMessage, {
