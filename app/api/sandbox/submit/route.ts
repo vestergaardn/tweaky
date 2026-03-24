@@ -62,31 +62,49 @@ export async function POST(req: Request) {
       appDir = (gitDirCheck.stdout || "").trim() || "/home/user/app"
     } catch { /* fallback to default */ }
 
-    // Stage all changes and capture the diff before modifying git state
+    // Stage all changes and detect what the user modified
     await sandbox.git.add(appDir, { all: true, timeoutMs: 30_000 })
 
     let diff: string
-    let changedFiles: string[]
+    let changedEntries: { status: string; file: string }[]
     try {
       const diffResult = await sandbox.commands.run(`cd ${appDir} && git diff --cached HEAD`, { timeoutMs: 30_000 })
       diff = diffResult.stdout
       const statusResult = await sandbox.commands.run(`cd ${appDir} && git diff --cached --name-status HEAD`, { timeoutMs: 30_000 })
-      changedFiles = statusResult.stdout.trim().split("\n").filter(Boolean)
+      changedEntries = statusResult.stdout.trim().split("\n").filter(Boolean).map((line) => {
+        const [status, ...rest] = line.split("\t")
+        return { status: status.charAt(0), file: rest.join("\t") }
+      })
     } catch (e) {
       console.error("[sandbox/submit] Failed to get diff:", e)
       return corsResponse({ error: "Failed to detect changes" }, { status: 500 })
     }
 
-    if (changedFiles.length === 0) {
+    if (changedEntries.length === 0) {
       return corsResponse({ error: "No changes to submit" }, { status: 400 })
     }
 
-    // Push changes to GitHub via git protocol instead of REST API.
-    // The sandbox has an unrelated git history (tarball extract → git init), so we
-    // cannot rebase onto origin. Instead: fetch origin, create a branch from it,
-    // apply the user's diff, commit, and push.
+    // The sandbox has an unrelated git history (tarball → git init), so diffs can't
+    // be applied cleanly onto origin. Instead we copy the changed files directly:
+    // 1. Save each changed file's content to /tmp
+    // 2. Checkout a branch from origin/main
+    // 3. Write the files back, delete removed files
+    // 4. Commit and push
     const commitMessage = `[Tweaky] ${prompt}`
     try {
+      // Save changed files to /tmp before switching branches (checkout overwrites working tree)
+      const tmpDir = "/tmp/tweaky-files"
+      await sandbox.commands.run(`rm -rf ${tmpDir} && mkdir -p ${tmpDir}`, { timeoutMs: 5_000 })
+      for (const entry of changedEntries) {
+        if (entry.status === "D") continue // deleted files — handled after checkout
+        // Preserve directory structure under /tmp/tweaky-files
+        const dirPart = entry.file.includes("/") ? entry.file.substring(0, entry.file.lastIndexOf("/")) : ""
+        if (dirPart) {
+          await sandbox.commands.run(`mkdir -p ${tmpDir}/${dirPart}`, { timeoutMs: 5_000 })
+        }
+        await sandbox.commands.run(`cp "${appDir}/${entry.file}" "${tmpDir}/${entry.file}"`, { timeoutMs: 10_000 })
+      }
+
       // Add GitHub remote with token auth and fetch the default branch
       const remoteUrl = `https://x-access-token:${githubToken}@github.com/${owner}/${repo}.git`
       await sandbox.git.remoteAdd(appDir, "origin", remoteUrl, {
@@ -104,36 +122,27 @@ export async function POST(req: Request) {
         return corsResponse({ error: "Failed to fetch from GitHub repository" }, { status: 500 })
       }
 
-      // Save the diff as a patch file outside the repo (checkout will overwrite the working tree)
-      const patchPath = "/tmp/tweaky-submit.patch"
-      await sandbox.files.write(patchPath, diff)
-
-      // Create a new branch from the real upstream and apply the user's diff
+      // Create a new branch from upstream
       await sandbox.commands.run(
         `cd ${appDir} && git checkout -b ${branchName} origin/${defaultBranch}`,
         { timeoutMs: 10_000 },
       )
-      try {
-        await sandbox.commands.run(
-          `cd ${appDir} && git apply --index ${patchPath}`,
-          { timeoutMs: 30_000 },
-        )
-      } catch {
-        // --index failed, try with --3way for fuzzy matching
-        try {
-          await sandbox.commands.run(
-            `cd ${appDir} && git apply --index --3way ${patchPath}`,
-            { timeoutMs: 30_000 },
-          )
-        } catch (e) {
-          console.error("[sandbox/submit] git apply failed:", e)
-          return corsResponse(
-            { error: "Changes conflict with the latest version of the codebase. Please try again." },
-            { status: 409 },
-          )
+
+      // Copy saved files back and handle deletions
+      for (const entry of changedEntries) {
+        if (entry.status === "D") {
+          await sandbox.commands.run(`cd ${appDir} && rm -f "${entry.file}"`, { timeoutMs: 5_000 })
+        } else {
+          // Ensure parent directory exists (file may be new in a new directory)
+          const dirPart = entry.file.includes("/") ? entry.file.substring(0, entry.file.lastIndexOf("/")) : ""
+          if (dirPart) {
+            await sandbox.commands.run(`mkdir -p "${appDir}/${dirPart}"`, { timeoutMs: 5_000 })
+          }
+          await sandbox.commands.run(`cp "${tmpDir}/${entry.file}" "${appDir}/${entry.file}"`, { timeoutMs: 10_000 })
         }
       }
 
+      await sandbox.git.add(appDir, { all: true, timeoutMs: 30_000 })
       await sandbox.git.commit(appDir, commitMessage, {
         authorName: "Tweaky",
         authorEmail: "bot@tweaky.dev",
