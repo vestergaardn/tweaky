@@ -1,9 +1,12 @@
 import { redirect } from "next/navigation"
+import { revalidatePath } from "next/cache"
 import { auth } from "@/lib/auth"
 import { getSupabaseAdmin } from "@/lib/supabase"
+import { encrypt, decrypt } from "@/lib/crypto"
 import { ArrowLeft } from "lucide-react"
 import Link from "next/link"
 import { CopyButton } from "./copy-button"
+import { EnvVarsForm } from "./env-vars-form"
 
 export default async function ProjectDetail({
   params,
@@ -24,6 +27,100 @@ export default async function ProjectDetail({
     .single()
 
   if (!project) redirect("/dashboard")
+
+  const { data: envVarRows } = await supabase
+    .from("project_env_vars")
+    .select("id, key")
+    .eq("project_id", id)
+    .order("created_at")
+
+  const pagePath = `/dashboard/projects/${id}`
+
+  async function verifyOwnership() {
+    "use server"
+    const s = await auth()
+    if (!s?.user?.companyId) redirect("/")
+    const { count } = await getSupabaseAdmin()
+      .from("projects")
+      .select("id", { count: "exact", head: true })
+      .eq("id", id)
+      .eq("company_id", s.user.companyId)
+    if (!count) redirect("/dashboard")
+    return s
+  }
+
+  async function addEnvVar(formData: FormData) {
+    "use server"
+    await verifyOwnership()
+    const key = (formData.get("key") as string).trim()
+    const value = formData.get("value") as string
+    if (!key || !value) return
+    await getSupabaseAdmin().from("project_env_vars").upsert(
+      { project_id: id, key, value: encrypt(value) },
+      { onConflict: "project_id,key" }
+    )
+    revalidatePath(pagePath)
+  }
+
+  async function bulkAddEnvVars(formData: FormData) {
+    "use server"
+    await verifyOwnership()
+    const bulk = formData.get("bulk") as string
+    if (!bulk?.trim()) return
+    const lines = bulk
+      .split("\n")
+      .map((l) => l.trim())
+      .filter((l) => l && !l.startsWith("#"))
+    const rows = lines
+      .map((l) => {
+        const eqIdx = l.indexOf("=")
+        if (eqIdx < 1) return null
+        return { key: l.slice(0, eqIdx).trim(), value: l.slice(eqIdx + 1) }
+      })
+      .filter(Boolean) as { key: string; value: string }[]
+    if (rows.length === 0) return
+    const db = getSupabaseAdmin()
+    for (const row of rows) {
+      await db.from("project_env_vars").upsert(
+        { project_id: id, key: row.key, value: encrypt(row.value) },
+        { onConflict: "project_id,key" }
+      )
+    }
+    revalidatePath(pagePath)
+  }
+
+  async function deleteEnvVar(formData: FormData) {
+    "use server"
+    await verifyOwnership()
+    const envVarId = formData.get("id") as string
+    await getSupabaseAdmin().from("project_env_vars").delete().eq("id", envVarId).eq("project_id", id)
+    revalidatePath(pagePath)
+  }
+
+  async function revealEnvVar(formData: FormData): Promise<string> {
+    "use server"
+    await verifyOwnership()
+    const envVarId = formData.get("id") as string
+    const { data } = await getSupabaseAdmin()
+      .from("project_env_vars")
+      .select("value")
+      .eq("id", envVarId)
+      .eq("project_id", id)
+      .single()
+    if (!data) return ""
+    return decrypt(data.value)
+  }
+
+  async function updateEnvFilePath(formData: FormData) {
+    "use server"
+    await verifyOwnership()
+    const envFilePath = (formData.get("env_file_path") as string)?.trim() || ".env"
+    await getSupabaseAdmin()
+      .from("projects")
+      .update({ env_file_path: envFilePath })
+      .eq("id", id)
+    revalidatePath(pagePath)
+  }
 
   const appUrl = process.env.NEXT_PUBLIC_APP_URL || "https://tweaky.vercel.app"
   const snippet = `<script src="${appUrl}/widget.js" data-project-id="${project.script_tag_id}"></script>`
@@ -74,6 +171,16 @@ export default async function ProjectDetail({
           <div className="font-mono font-medium">{project.dev_command}</div>
         </div>
       </div>
+
+      <EnvVarsForm
+        envVars={envVarRows ?? []}
+        envFilePath={project.env_file_path ?? ".env"}
+        addEnvVar={addEnvVar}
+        bulkAddEnvVars={bulkAddEnvVars}
+        deleteEnvVar={deleteEnvVar}
+        revealEnvVar={revealEnvVar}
+        updateEnvFilePath={updateEnvFilePath}
+      />
     </div>
   )
 }

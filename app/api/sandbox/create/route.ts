@@ -160,7 +160,7 @@ export async function POST(req: Request) {
     // Write .env file (if the project has env vars)
     if (envString) {
       const envPath = path.resolve(appDir, project.env_file_path ?? ".env")
-      if (!envPath.startsWith("/home/user/app/") && !envPath.startsWith("/home/user/app")) {
+      if (!envPath.startsWith("/home/user/app/")) {
         await sandbox.kill()
         return corsResponse({ error: "Invalid env file path" }, { status: 400 })
       }
