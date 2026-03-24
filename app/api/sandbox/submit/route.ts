@@ -1,4 +1,5 @@
 import { Sandbox } from "@e2b/code-interpreter"
+import { CommandExitError } from "e2b"
 import { Octokit } from "@octokit/rest"
 import { getSupabaseAdmin } from "@/lib/supabase"
 import { corsResponse, corsOptions } from "@/lib/cors"
@@ -62,13 +63,19 @@ export async function POST(req: Request) {
     } catch { /* fallback to default */ }
 
     // Stage all changes and capture the diff before modifying git state
-    await sandbox.commands.run(`cd ${appDir} && git add -A`, { timeoutMs: 30_000 })
+    await sandbox.git.add(appDir, { all: true, timeoutMs: 30_000 })
 
-    const diffResult = await sandbox.commands.run(`cd ${appDir} && git diff --cached HEAD`, { timeoutMs: 30_000 })
-    const diff = diffResult.stdout
-
-    const statusResult = await sandbox.commands.run(`cd ${appDir} && git diff --cached --name-status HEAD`, { timeoutMs: 30_000 })
-    const changedFiles = statusResult.stdout.trim().split("\n").filter(Boolean)
+    let diff: string
+    let changedFiles: string[]
+    try {
+      const diffResult = await sandbox.commands.run(`cd ${appDir} && git diff --cached HEAD`, { timeoutMs: 30_000 })
+      diff = diffResult.stdout
+      const statusResult = await sandbox.commands.run(`cd ${appDir} && git diff --cached --name-status HEAD`, { timeoutMs: 30_000 })
+      changedFiles = statusResult.stdout.trim().split("\n").filter(Boolean)
+    } catch (e) {
+      console.error("[sandbox/submit] Failed to get diff:", e)
+      return corsResponse({ error: "Failed to detect changes" }, { status: 500 })
+    }
 
     if (changedFiles.length === 0) {
       return corsResponse({ error: "No changes to submit" }, { status: 400 })
@@ -77,72 +84,96 @@ export async function POST(req: Request) {
     // Push changes to GitHub via git protocol instead of REST API.
     // This avoids the blob/tree/commit/ref API calls that consume rate limits.
     // The only REST API call needed is PR creation (1 call instead of 5+N).
+    const commitMessage = `[Tweaky] ${prompt}`
     try {
       // Commit the user's changes locally
-      await sandbox.git.commit(appDir, `[Tweaky] ${prompt}`)
+      await sandbox.git.commit(appDir, commitMessage, {
+        authorName: "Tweaky",
+        authorEmail: "bot@tweaky.dev",
+        timeoutMs: 30_000,
+      })
 
       // Save the diff to a file for fallback conflict resolution
       await sandbox.files.write(`${appDir}/.tweaky-diff.patch`, diff)
 
       // Add GitHub remote with token auth and fetch the default branch
       const remoteUrl = `https://x-access-token:${githubToken}@github.com/${owner}/${repo}.git`
-      await sandbox.git.remoteAdd(appDir, "origin", remoteUrl)
-      const fetchResult = await sandbox.commands.run(
-        `cd ${appDir} && git fetch origin ${defaultBranch}`,
-        { timeoutMs: 60_000 },
-      )
-      if (fetchResult.exitCode !== 0) {
-        console.error("[sandbox/submit] git fetch failed:", fetchResult.stderr)
+      await sandbox.git.remoteAdd(appDir, "origin", remoteUrl, {
+        overwrite: true,
+        timeoutMs: 10_000,
+      })
+
+      try {
+        await sandbox.commands.run(
+          `cd ${appDir} && git fetch origin ${defaultBranch}`,
+          { timeoutMs: 60_000 },
+        )
+      } catch (e) {
+        console.error("[sandbox/submit] git fetch failed:", e)
         return corsResponse({ error: "Failed to fetch from GitHub repository" }, { status: 500 })
       }
 
-      // Rebase our commit(s) on top of the remote default branch so history is clean
-      const rebaseResult = await sandbox.commands.run(
-        `cd ${appDir} && git rebase origin/${defaultBranch}`,
-        { timeoutMs: 60_000 },
-      )
-      if (rebaseResult.exitCode !== 0) {
-        // Rebase failed (conflicts) — abort and apply diff on a fresh branch instead
-        await sandbox.commands.run(`cd ${appDir} && git rebase --abort`, { timeoutMs: 10_000 })
+      // Rebase our commit(s) on top of the remote default branch so history is clean.
+      // commands.run throws CommandExitError on non-zero exit, so we catch to handle conflicts.
+      let rebaseOk = false
+      try {
+        await sandbox.commands.run(
+          `cd ${appDir} && git rebase origin/${defaultBranch}`,
+          { timeoutMs: 60_000 },
+        )
+        rebaseOk = true
+      } catch {
+        // Rebase failed (likely conflicts) — will apply diff on a fresh branch below
+      }
+
+      if (!rebaseOk) {
+        // Abort the failed rebase and apply the diff on a fresh branch from upstream
+        try { await sandbox.commands.run(`cd ${appDir} && git rebase --abort`, { timeoutMs: 10_000 }) } catch { /* may already be aborted */ }
         await sandbox.commands.run(
           `cd ${appDir} && git checkout -b ${branchName} origin/${defaultBranch}`,
           { timeoutMs: 10_000 },
         )
-        const applyResult = await sandbox.commands.run(
-          `cd ${appDir} && git apply --index --3way .tweaky-diff.patch`,
-          { timeoutMs: 30_000 },
-        )
-        if (applyResult.exitCode !== 0) {
-          console.error("[sandbox/submit] git apply failed:", applyResult.stderr)
+        try {
+          await sandbox.commands.run(
+            `cd ${appDir} && git apply --index --3way .tweaky-diff.patch`,
+            { timeoutMs: 30_000 },
+          )
+        } catch (e) {
+          console.error("[sandbox/submit] git apply failed:", e)
           return corsResponse(
             { error: "Changes conflict with the latest version of the codebase. Please try again." },
             { status: 409 },
           )
         }
-        await sandbox.git.commit(appDir, `[Tweaky] ${prompt}`)
+        await sandbox.git.commit(appDir, commitMessage, {
+          authorName: "Tweaky",
+          authorEmail: "bot@tweaky.dev",
+          timeoutMs: 30_000,
+        })
       } else {
         // Rebase succeeded — create the branch name at HEAD
-        await sandbox.commands.run(
-          `cd ${appDir} && git checkout -b ${branchName}`,
-          { timeoutMs: 10_000 },
-        )
+        await sandbox.git.createBranch(appDir, branchName, { timeoutMs: 10_000 })
       }
 
       // Push the branch to GitHub via git protocol (no REST API rate limit impact)
-      const pushResult = await sandbox.git.push(appDir, {
-        remote: "origin",
-        branch: branchName,
-        username: "x-access-token",
-        password: githubToken,
-        timeoutMs: 60_000,
-      })
-      if (pushResult.exitCode !== 0) {
-        console.error("[sandbox/submit] git push failed:", pushResult.stderr)
+      try {
+        await sandbox.git.push(appDir, {
+          remote: "origin",
+          branch: branchName,
+          username: "x-access-token",
+          password: githubToken,
+          timeoutMs: 60_000,
+        })
+      } catch (e) {
+        const detail = e instanceof CommandExitError ? e.stderr : (e instanceof Error ? e.message : String(e))
+        console.error("[sandbox/submit] git push failed:", detail)
         return corsResponse({ error: "Failed to push changes to GitHub" }, { status: 500 })
       }
     } catch (e) {
       console.error("[sandbox/submit] Git operations failed:", e)
-      const msg = e instanceof Error ? e.message : String(e)
+      const msg = e instanceof CommandExitError
+        ? `${e.message} | stderr: ${e.stderr}`
+        : (e instanceof Error ? e.message : String(e))
       return corsResponse({ error: `Failed to push changes: ${msg}` }, { status: 500 })
     }
 
