@@ -130,9 +130,28 @@ export async function POST(req: Request) {
     try {
       const installResult = await sandbox.commands.run(project.install_command || "npm install", { cwd: "/home/user/app", timeoutMs: 120_000 })
       if (installResult.exitCode !== 0) {
-        console.error("[sandbox/create] Install failed:", installResult.stderr)
+        const stderr = installResult.stderr || ""
+        // Try to read the full npm debug log if referenced in stderr
+        let fullLog = ""
+        const logMatch = stderr.match(/\/home\/user\/\.npm\/_logs\/[^\s]+\.log/)
+        if (logMatch) {
+          try {
+            const logResult = await sandbox.commands.run(`cat ${logMatch[0]}`, { timeoutMs: 5_000 })
+            if (logResult.exitCode === 0) fullLog = logResult.stdout
+          } catch { /* best effort */ }
+        }
+        // Also list what's actually in /home/user/app for diagnosis
+        let dirListing = ""
+        try {
+          const lsResult = await sandbox.commands.run("ls -la /home/user/app/ 2>&1 | head -20", { timeoutMs: 5_000 })
+          dirListing = lsResult.stdout
+        } catch { /* best effort */ }
+        console.error("[sandbox/create] Install failed:", stderr)
+        if (fullLog) console.error("[sandbox/create] Full npm log:", fullLog)
+        if (dirListing) console.error("[sandbox/create] /home/user/app contents:", dirListing)
         await sandbox.kill()
-        return corsResponse({ error: `Install failed: ${installResult.stderr.slice(-500)}` }, { status: 500 })
+        const diagnostic = fullLog || stderr
+        return corsResponse({ error: `Install failed: ${diagnostic.slice(-1500)}` }, { status: 500 })
       }
     } catch (installErr: any) {
       const detail = installErr?.stderr || installErr?.stdout || ""
