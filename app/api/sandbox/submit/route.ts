@@ -3,7 +3,7 @@ import { Octokit } from "@octokit/rest"
 import { getSupabaseAdmin } from "@/lib/supabase"
 import { corsResponse, corsOptions } from "@/lib/cors"
 
-export const maxDuration = 60
+export const maxDuration = 120
 
 export function OPTIONS() { return corsOptions() }
 
@@ -21,7 +21,32 @@ export async function POST(req: Request) {
     if (!project) return corsResponse({ error: "Not found" }, { status: 404 })
 
     const githubToken = (project.companies as any).github_token
-    sandbox = await Sandbox.connect(sandboxId)
+    if (!githubToken) {
+      return corsResponse({ error: "GitHub token not configured" }, { status: 500 })
+    }
+
+    // Connect to the sandbox — most common failure point (sandbox expired/killed)
+    try {
+      sandbox = await Sandbox.connect(sandboxId)
+    } catch (e) {
+      console.error("[sandbox/submit] Failed to connect to sandbox:", e)
+      return corsResponse(
+        { error: "Sandbox expired or unavailable. Please reload the page and try again." },
+        { status: 410 },
+      )
+    }
+
+    // Quick health check — verify sandbox is responsive
+    try {
+      await sandbox.commands.run("echo ok", { timeoutMs: 5_000 })
+    } catch (e) {
+      console.error("[sandbox/submit] Sandbox health check failed:", e)
+      return corsResponse(
+        { error: "Sandbox is not responding. Please reload the page and try again." },
+        { status: 410 },
+      )
+    }
+
     const octokit = new Octokit({ auth: githubToken })
     const [owner, repo] = project.repo_full_name.split("/")
     const branchName = `tweaky/${Date.now()}`
@@ -52,51 +77,79 @@ export async function POST(req: Request) {
       return corsResponse({ error: "No changes to submit" }, { status: 400 })
     }
 
-    const { data: baseRef } = await octokit.git.getRef({
-      owner, repo, ref: `heads/${project.default_branch}`,
-    })
-    const baseSha = baseRef.object.sha
+    // Fetch base branch ref from GitHub
+    let baseSha: string
+    let baseTreeSha: string
+    try {
+      const { data: baseRef } = await octokit.git.getRef({
+        owner, repo, ref: `heads/${project.default_branch}`,
+      })
+      baseSha = baseRef.object.sha
 
-    const { data: baseCommit } = await octokit.git.getCommit({
-      owner, repo, commit_sha: baseSha,
-    })
+      const { data: baseCommit } = await octokit.git.getCommit({
+        owner, repo, commit_sha: baseSha,
+      })
+      baseTreeSha = baseCommit.tree.sha
+    } catch (e: any) {
+      const detail = e?.response?.data?.message || e?.message || String(e)
+      console.error("[sandbox/submit] GitHub base ref fetch failed:", detail, e)
+      return corsResponse(
+        { error: `Failed to fetch base branch from GitHub: ${detail}` },
+        { status: 500 },
+      )
+    }
 
-    const treeItems = await Promise.all(
-      fileEntries.map(async ({ status, path: filePath }) => {
+    // Read changed files from sandbox and create GitHub blobs.
+    // Files are read sequentially to avoid overwhelming the sandbox connection limit
+    // (the dev server's HMR WebSocket already consumes many of the 1000 allowed connections).
+    const treeItems: Array<{ path: string; mode: "100644"; type: "blob"; sha: string | null }> = []
+    try {
+      for (const { status, path: filePath } of fileEntries) {
         if (status === "D") {
-          return { path: filePath, mode: "100644" as const, type: "blob" as const, sha: null }
+          treeItems.push({ path: filePath, mode: "100644" as const, type: "blob" as const, sha: null })
+          continue
         }
+
         const content = await sandbox!.files.read(`${appDir}/${filePath}`)
         const { data: blob } = await octokit.git.createBlob({
           owner, repo,
           content: Buffer.from(content).toString("base64"),
           encoding: "base64",
         })
-        return { path: filePath, mode: "100644" as const, type: "blob" as const, sha: blob.sha }
+        treeItems.push({ path: filePath, mode: "100644" as const, type: "blob" as const, sha: blob.sha })
+      }
+    } catch (e) {
+      console.error("[sandbox/submit] File read or blob creation failed:", e)
+      const msg = e instanceof Error ? e.message : String(e)
+      return corsResponse(
+        { error: `Failed to read files or create GitHub blobs: ${msg.slice(-300)}` },
+        { status: 500 },
+      )
+    }
+
+    // Create tree, commit, branch, and PR on GitHub
+    try {
+      const { data: newTree } = await octokit.git.createTree({
+        owner, repo, base_tree: baseTreeSha, tree: treeItems,
       })
-    )
 
-    const { data: newTree } = await octokit.git.createTree({
-      owner, repo, base_tree: baseCommit.tree.sha, tree: treeItems,
-    })
+      const { data: newCommit } = await octokit.git.createCommit({
+        owner, repo,
+        message: `[Tweaky] ${prompt}`,
+        tree: newTree.sha,
+        parents: [baseSha],
+      })
 
-    const { data: newCommit } = await octokit.git.createCommit({
-      owner, repo,
-      message: `[Tweaky] ${prompt}`,
-      tree: newTree.sha,
-      parents: [baseSha],
-    })
+      await octokit.git.createRef({
+        owner, repo, ref: `refs/heads/${branchName}`, sha: newCommit.sha,
+      })
 
-    await octokit.git.createRef({
-      owner, repo, ref: `refs/heads/${branchName}`, sha: newCommit.sha,
-    })
-
-    const { data: pr } = await octokit.pulls.create({
-      owner, repo,
-      title: `[Tweaky] ${prompt}`,
-      head: branchName,
-      base: project.default_branch,
-      body: `## Tweaky Submission
+      const { data: pr } = await octokit.pulls.create({
+        owner, repo,
+        title: `[Tweaky] ${prompt}`,
+        head: branchName,
+        base: project.default_branch,
+        body: `## Tweaky Submission
 
 **Request:** ${prompt}
 **Submitted by:** ${userEmail}
@@ -112,21 +165,29 @@ ${diff}
 
 ---
 *Generated by [Tweaky](https://tweaky.dev)*`,
-    })
+      })
 
-    await getSupabaseAdmin().from("submissions").insert({
-      project_id: project.id,
-      user_prompt: prompt,
-      user_email: userEmail,
-      bounty_amount: bountyAmount,
-      pr_url: pr.html_url,
-      pr_number: pr.number,
-      status: "pending",
-    })
+      await getSupabaseAdmin().from("submissions").insert({
+        project_id: project.id,
+        user_prompt: prompt,
+        user_email: userEmail,
+        bounty_amount: bountyAmount,
+        pr_url: pr.html_url,
+        pr_number: pr.number,
+        status: "pending",
+      })
 
-    await sandbox.kill()
+      await sandbox.kill()
 
-    return corsResponse({ prUrl: pr.html_url })
+      return corsResponse({ prUrl: pr.html_url })
+    } catch (e) {
+      console.error("[sandbox/submit] GitHub PR creation failed:", e)
+      const msg = e instanceof Error ? e.message : String(e)
+      return corsResponse(
+        { error: `Failed to create PR on GitHub: ${msg.slice(-300)}` },
+        { status: 500 },
+      )
+    }
   } catch (error) {
     console.error("[sandbox/submit] Error:", error)
     if (sandbox) {
