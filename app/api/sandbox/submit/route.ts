@@ -66,14 +66,19 @@ export async function POST(req: Request) {
     await sandbox.git.add(appDir, { all: true, timeoutMs: 30_000 })
 
     let diff: string
-    let changedEntries: { status: string; file: string }[]
+    let changedEntries: { status: string; file: string; oldFile?: string }[]
     try {
       const diffResult = await sandbox.commands.run(`cd ${appDir} && git diff --cached HEAD`, { timeoutMs: 30_000 })
       diff = diffResult.stdout
       const statusResult = await sandbox.commands.run(`cd ${appDir} && git diff --cached --name-status HEAD`, { timeoutMs: 30_000 })
       changedEntries = statusResult.stdout.trim().split("\n").filter(Boolean).map((line) => {
-        const [status, ...rest] = line.split("\t")
-        return { status: status.charAt(0), file: rest.join("\t") }
+        const parts = line.split("\t")
+        const status = parts[0].charAt(0)
+        if (status === "R" || status === "C") {
+          // Rename/copy: parts = [status, old-name, new-name]
+          return { status, file: parts[2], oldFile: parts[1] }
+        }
+        return { status, file: parts[1] }
       })
     } catch (e) {
       console.error("[sandbox/submit] Failed to get diff:", e)
@@ -122,16 +127,27 @@ export async function POST(req: Request) {
         return corsResponse({ error: "Failed to fetch from GitHub repository" }, { status: 500 })
       }
 
-      // Create a new branch from upstream
+      // Reset the index so checkout doesn't conflict with staged changes
+      await sandbox.commands.run(`cd ${appDir} && git reset HEAD`, { timeoutMs: 10_000 })
+
+      // Create a new branch from upstream (force to discard local working tree)
       await sandbox.commands.run(
-        `cd ${appDir} && git checkout -b ${branchName} origin/${defaultBranch}`,
+        `cd ${appDir} && git checkout -f -b ${branchName} origin/${defaultBranch}`,
         { timeoutMs: 10_000 },
       )
 
-      // Copy saved files back and handle deletions
+      // Copy saved files back and handle deletions/renames
       for (const entry of changedEntries) {
         if (entry.status === "D") {
           await sandbox.commands.run(`cd ${appDir} && rm -f "${entry.file}"`, { timeoutMs: 5_000 })
+        } else if (entry.status === "R" && entry.oldFile) {
+          // Rename: delete old path, copy new content
+          await sandbox.commands.run(`cd ${appDir} && rm -f "${entry.oldFile}"`, { timeoutMs: 5_000 })
+          const dirPart = entry.file.includes("/") ? entry.file.substring(0, entry.file.lastIndexOf("/")) : ""
+          if (dirPart) {
+            await sandbox.commands.run(`mkdir -p "${appDir}/${dirPart}"`, { timeoutMs: 5_000 })
+          }
+          await sandbox.commands.run(`cp "${tmpDir}/${entry.file}" "${appDir}/${entry.file}"`, { timeoutMs: 10_000 })
         } else {
           // Ensure parent directory exists (file may be new in a new directory)
           const dirPart = entry.file.includes("/") ? entry.file.substring(0, entry.file.lastIndexOf("/")) : ""
