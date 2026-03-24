@@ -147,16 +147,6 @@ export async function POST(req: Request) {
     }
     const projectInfo = parseIntrospection(introspectResult.stdout)
 
-    // Init a git repo so the submit route can use git diff to detect changes
-    try {
-      await sandbox.commands.run(
-        `cd ${appDir} && git config --global user.email "sandbox@tweaky.dev" && git config --global user.name "Tweaky Sandbox" && git init && git add -A && git commit -m "initial"`,
-        { timeoutMs: 60_000 },
-      )
-    } catch {
-      // Non-fatal — submit route will still work via file reads
-    }
-
     // Write .env file (if the project has env vars)
     if (envString) {
       const envPath = path.resolve(appDir, project.env_file_path ?? ".env")
@@ -201,6 +191,18 @@ export async function POST(req: Request) {
       console.error("[sandbox/create] Install failed:", msg)
       await sandbox.kill()
       return corsResponse({ error: `Install failed: ${msg.slice(-500)}` }, { status: 500 })
+    }
+
+    // Init a git repo AFTER install + env setup so the initial commit captures
+    // the fully-installed state. This way the submit route's diff only shows
+    // actual user edits, not package-lock.json or .env changes.
+    try {
+      await sandbox.commands.run(
+        `cd ${appDir} && git config --global user.email "sandbox@tweaky.dev" && git config --global user.name "Tweaky Sandbox" && git init && git add -A && git commit -m "initial"`,
+        { timeoutMs: 60_000 },
+      )
+    } catch {
+      // Non-fatal — submit route filters artifacts and works regardless
     }
 
     // Start dev server in background and wait for it to be ready
