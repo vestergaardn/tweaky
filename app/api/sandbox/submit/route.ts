@@ -96,7 +96,9 @@ export async function POST(req: Request) {
       )
       const allEntries = parseNameStatus(result.stdout)
       // Filter out package manager artifacts and env files
-      changedEntries = allEntries.filter((e) => !ARTIFACT_FILES.has(e.file))
+      changedEntries = allEntries.filter(
+        (e) => !ARTIFACT_FILES.has(e.file) && !e.file.startsWith("node_modules/"),
+      )
     } catch (e) {
       console.error("[sandbox/submit] Failed to detect changes:", e)
       return corsResponse({ error: "Failed to detect changes" }, { status: 500 })
