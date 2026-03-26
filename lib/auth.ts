@@ -1,9 +1,24 @@
 import NextAuth from "next-auth"
+import { encode, decode as defaultDecode } from "next-auth/jwt"
 import GitHub from "next-auth/providers/github"
 import { getSupabaseAdmin } from "./supabase"
 
 export const { handlers, signIn, signOut, auth } = NextAuth({
   secret: process.env.AUTH_SECRET || process.env.NEXTAUTH_SECRET,
+  logger: {
+    error() {},
+    warn() {},
+  },
+  jwt: {
+    encode,
+    async decode(params) {
+      try {
+        return await defaultDecode(params)
+      } catch {
+        return null
+      }
+    },
+  },
   providers: [
     GitHub({
       clientId: process.env.GITHUB_CLIENT_ID!,
