@@ -1,15 +1,7 @@
 import Image from "next/image"
-import { auth, signIn } from "@/lib/auth"
-import { redirect } from "next/navigation"
+import { signIn } from "@/lib/auth"
 
 export default async function Home() {
-  let session = null
-  try {
-    session = await auth()
-  } catch {
-    // Stale JWT cookie — handled gracefully, page renders as logged-out
-  }
-  if (session) redirect("/dashboard")
 
   return (
     <div className="relative min-h-screen bg-[#171d37] flex items-center justify-center overflow-hidden">
@@ -63,7 +55,7 @@ export default async function Home() {
           </form>
 
           <a
-            href="#manifesto"
+            href="/manifesto"
             className="border border-white text-white text-xs font-medium px-4 py-2 rounded-full hover:bg-white/10"
           >
             Manifesto
