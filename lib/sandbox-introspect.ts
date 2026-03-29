@@ -141,6 +141,7 @@ Make only the changes needed to fulfil the user's request.
 
 RULES:
 - Respond with ONLY a JSON object. No explanation. No markdown fences.
+- Your response must begin with { — no preamble, no wrapping.
 - The JSON must have a "files" key: an array of {path, content} objects.
 - "path" is relative to the project root (e.g. "src/components/Navbar.tsx").
 - Only include files that need to change.

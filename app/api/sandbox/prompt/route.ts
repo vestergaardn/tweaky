@@ -1,13 +1,12 @@
 import { Sandbox } from "@e2b/code-interpreter"
-import Anthropic from "@anthropic-ai/sdk"
+import { generateText } from "ai"
+import { anthropic } from "@ai-sdk/anthropic"
 import { corsResponse, corsOptions } from "@/lib/cors"
 import { INTROSPECT_CMD, parseIntrospection, discoverSourceFiles, buildSystemPrompt } from "@/lib/sandbox-introspect"
 
 export const maxDuration = 60
 
 export function OPTIONS() { return corsOptions() }
-
-const anthropic = new Anthropic()
 
 export async function POST(req: Request) {
   try {
@@ -31,25 +30,17 @@ export async function POST(req: Request) {
     const files = await discoverSourceFiles(sandbox, appDir)
     const filePaths = Object.keys(files)
 
-    const message = await anthropic.messages.create({
-      model: "claude-sonnet-4-5",
-      max_tokens: 8192,
+    const { text } = await generateText({
+      model: anthropic("claude-sonnet-4-5"),
+      maxOutputTokens: 8192,
       system: buildSystemPrompt(projectInfo, filePaths),
       messages: [
         {
           role: "user",
           content: `Source code:\n\n${JSON.stringify(files, null, 2)}\n\nRequest: ${prompt}`,
         },
-        {
-          role: "assistant",
-          content: "{",
-        },
       ],
     })
-
-    const rawText = message.content[0].type === "text" ? message.content[0].text : ""
-    // Prepend the prefilled "{", but skip if the model repeated it
-    const text = rawText.trimStart().startsWith("{") ? rawText.trimStart() : "{" + rawText
 
     let changedFiles: { path: string; content: string }[] = []
     try {
