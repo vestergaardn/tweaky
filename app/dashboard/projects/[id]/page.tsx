@@ -35,6 +35,13 @@ export default async function ProjectDetail({
     .eq("project_id", id)
     .order("created_at")
 
+  const { data: company } = await supabase
+    .from("companies")
+    .select("vercel_token")
+    .eq("id", companyId)
+    .single()
+  const vercelConnected = !!company?.vercel_token
+
   const pagePath = `/dashboard/projects/${id}`
 
   async function verifyOwnership() {
@@ -212,6 +219,8 @@ export default async function ProjectDetail({
       <EnvVarsForm
         envVars={envVarRows ?? []}
         envFilePath={project.env_file_path ?? ".env"}
+        projectId={id}
+        vercelConnected={vercelConnected}
         addEnvVar={addEnvVar}
         bulkAddEnvVars={bulkAddEnvVars}
         deleteEnvVar={deleteEnvVar}
