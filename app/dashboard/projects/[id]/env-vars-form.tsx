@@ -1,13 +1,17 @@
 "use client"
 
 import { useState } from "react"
+import { useRouter } from "next/navigation"
 import { KeyRound, Eye, EyeOff, Trash2 } from "lucide-react"
+import { VercelImportModal } from "./vercel-import-modal"
 
 type EnvVar = { id: string; key: string }
 
 export function EnvVarsForm({
   envVars,
   envFilePath,
+  projectId,
+  vercelConnected,
   addEnvVar,
   bulkAddEnvVars,
   deleteEnvVar,
@@ -16,15 +20,19 @@ export function EnvVarsForm({
 }: {
   envVars: EnvVar[]
   envFilePath: string
+  projectId: string
+  vercelConnected: boolean
   addEnvVar: (formData: FormData) => Promise<void>
   bulkAddEnvVars: (formData: FormData) => Promise<void>
   deleteEnvVar: (formData: FormData) => Promise<void>
   revealEnvVar: (formData: FormData) => Promise<string>
   updateEnvFilePath: (formData: FormData) => Promise<void>
 }) {
+  const router = useRouter()
   const [revealed, setRevealed] = useState<Record<string, string>>({})
   const [bulkText, setBulkText] = useState("")
   const [showBulk, setShowBulk] = useState(envVars.length === 0)
+  const [showVercelModal, setShowVercelModal] = useState(false)
 
   async function handleReveal(id: string) {
     if (revealed[id]) {
@@ -48,16 +56,44 @@ export function EnvVarsForm({
           <KeyRound size={16} className="text-zinc-400" />
           Environment Variables
         </h2>
-        {envVars.length > 0 && (
-          <button
-            type="button"
-            onClick={() => setShowBulk(!showBulk)}
-            className="text-xs text-zinc-500 hover:text-zinc-700"
-          >
-            {showBulk ? "Hide bulk paste" : "Bulk paste"}
-          </button>
-        )}
+        <div className="flex items-center gap-3">
+          {vercelConnected ? (
+            <button
+              type="button"
+              onClick={() => setShowVercelModal(true)}
+              className="text-xs text-zinc-500 hover:text-zinc-700 flex items-center gap-1"
+            >
+              <svg width="13" height="13" viewBox="0 0 76 65" fill="currentColor"><path d="M37.5274 0L75.0548 65H0L37.5274 0Z" /></svg>
+              Import from Vercel
+            </button>
+          ) : (
+            <a
+              href={`/api/vercel/connect?returnTo=/dashboard/projects/${projectId}`}
+              className="text-xs text-zinc-500 hover:text-zinc-700 flex items-center gap-1"
+            >
+              <svg width="13" height="13" viewBox="0 0 76 65" fill="currentColor"><path d="M37.5274 0L75.0548 65H0L37.5274 0Z" /></svg>
+              Connect Vercel
+            </a>
+          )}
+          {envVars.length > 0 && (
+            <button
+              type="button"
+              onClick={() => setShowBulk(!showBulk)}
+              className="text-xs text-zinc-500 hover:text-zinc-700"
+            >
+              {showBulk ? "Hide bulk paste" : "Bulk paste"}
+            </button>
+          )}
+        </div>
       </div>
+
+      {showVercelModal && (
+        <VercelImportModal
+          projectId={projectId}
+          onClose={() => setShowVercelModal(false)}
+          onImported={() => router.refresh()}
+        />
+      )}
 
       {/* Env file path */}
       <form action={updateEnvFilePath} className="flex items-center gap-2">

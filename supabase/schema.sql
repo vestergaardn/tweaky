@@ -3,6 +3,8 @@ create table companies (
   github_id text unique not null,
   github_login text not null,
   github_token text not null,
+  vercel_token text,
+  vercel_team_id text,
   created_at timestamptz default now()
 );
 
