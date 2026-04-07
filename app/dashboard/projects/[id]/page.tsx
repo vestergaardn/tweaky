@@ -7,6 +7,7 @@ import { ArrowLeft } from "lucide-react"
 import Link from "next/link"
 import { CopyButton } from "./copy-button"
 import { EnvVarsForm } from "./env-vars-form"
+import { WidgetCustomizationForm } from "./widget-customization-form"
 
 export default async function ProjectDetail({
   params,
@@ -111,6 +112,28 @@ export default async function ProjectDetail({
     return decrypt(data.value)
   }
 
+  async function updateWidgetConfig(formData: FormData) {
+    "use server"
+    await verifyOwnership()
+    const launchType = formData.get("widget_launch_type") as string
+    const buttonColor = formData.get("widget_button_color") as string
+    const buttonText = formData.get("widget_button_text") as string
+    const iconOnly = formData.get("widget_icon_only") === "true"
+    const welcomeMessage = (formData.get("widget_welcome_message") as string) || null
+
+    await getSupabaseAdmin()
+      .from("projects")
+      .update({
+        widget_launch_type: launchType,
+        widget_button_color: buttonColor,
+        widget_button_text: buttonText,
+        widget_icon_only: iconOnly,
+        widget_welcome_message: welcomeMessage?.slice(0, 150) || null,
+      })
+      .eq("id", id)
+    revalidatePath(pagePath)
+  }
+
   async function updateEnvFilePath(formData: FormData) {
     "use server"
     await verifyOwnership()
@@ -171,6 +194,20 @@ export default async function ProjectDetail({
           <div className="font-mono font-medium">{project.dev_command}</div>
         </div>
       </div>
+
+      <WidgetCustomizationForm
+        projectId={id}
+        scriptTagId={project.script_tag_id}
+        initialConfig={{
+          widget_launch_type: project.widget_launch_type ?? "button",
+          widget_button_color: project.widget_button_color ?? "#18181b",
+          widget_button_text: project.widget_button_text ?? "✦ Tweak this",
+          widget_icon_only: project.widget_icon_only ?? false,
+          widget_logo_url: project.widget_logo_url ?? null,
+          widget_welcome_message: project.widget_welcome_message ?? null,
+        }}
+        updateWidgetConfig={updateWidgetConfig}
+      />
 
       <EnvVarsForm
         envVars={envVarRows ?? []}

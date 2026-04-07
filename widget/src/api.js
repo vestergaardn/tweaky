@@ -41,3 +41,15 @@ export async function callSubmit({ sandboxId, projectId, prompt, bountyAmount, u
 export function callKillSandbox(sandboxId) {
   fetch(`${API_URL}/api/sandbox/${sandboxId}`, { method: "DELETE" }).catch(() => {})
 }
+
+export async function fetchProjectConfig(projectId) {
+  const res = await fetch(`${API_URL}/api/projects/${projectId}`)
+  if (!res.ok) throw new Error("Failed to fetch project config")
+  return res.json()
+}
+
+export async function fetchSubmissions(projectId, email) {
+  const res = await fetch(`${API_URL}/api/projects/${projectId}/submissions?email=${encodeURIComponent(email)}`)
+  if (!res.ok) throw new Error("Failed to fetch submissions")
+  return res.json()
+}
