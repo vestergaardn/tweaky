@@ -45,7 +45,7 @@ export default async function CreateProjectLayout({
       </aside>
 
       {/* Main content */}
-      <main className="relative z-10 flex flex-1 flex-col items-center justify-center">
+      <main className="relative z-10 flex flex-1 flex-col items-center justify-center -ml-56">
         {children}
       </main>
     </div>
