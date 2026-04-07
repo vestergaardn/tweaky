@@ -1,4 +1,4 @@
-"use strict";(()=>{var P=document.currentScript||document.querySelector("script[data-project-id]"),b=P?new URL(P.src).origin:window.location.origin;async function q(i){let t=await fetch(`${b}/api/sandbox/create`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({scriptTagId:i})});if(!t.ok){let e=await t.json().catch(()=>({}));throw new Error(e.error||"Failed to create sandbox")}return t.json()}async function M(i,t){let e=await fetch(`${b}/api/sandbox/prompt`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({sandboxId:i,prompt:t})});if(!e.ok)throw new Error("Failed to apply prompt");return e.json()}async function O({sandboxId:i,projectId:t,prompt:e,bountyAmount:r,userEmail:d}){let p=await fetch(`${b}/api/sandbox/submit`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({sandboxId:i,scriptTagId:t,prompt:e,bountyAmount:r,userEmail:d})});if(!p.ok)throw new Error("Failed to submit PR");return p.json()}function H(i){fetch(`${b}/api/sandbox/${i}`,{method:"DELETE"}).catch(()=>{})}function R(i,t){document.body.style.overflow="hidden";let e=document.createElement("div");e.id="lc-overlay",e.style.cssText=`
+"use strict";(()=>{var U=document.currentScript||document.querySelector("script[data-project-id]"),h=U?new URL(U.src).origin:window.location.origin;async function N(s){let n=await fetch(`${h}/api/sandbox/create`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({scriptTagId:s})});if(!n.ok){let l=await n.json().catch(()=>({}));throw new Error(l.error||"Failed to create sandbox")}return n.json()}async function J(s,n){let l=await fetch(`${h}/api/sandbox/prompt`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({sandboxId:s,prompt:n})});if(!l.ok)throw new Error("Failed to apply prompt");return l.json()}async function K({sandboxId:s,projectId:n,prompt:l,bountyAmount:d,userEmail:m}){let f=await fetch(`${h}/api/sandbox/submit`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({sandboxId:s,scriptTagId:n,prompt:l,bountyAmount:d,userEmail:m})});if(!f.ok)throw new Error("Failed to submit PR");return f.json()}function Y(s){fetch(`${h}/api/sandbox/${s}`,{method:"DELETE"}).catch(()=>{})}async function G(s){let n=await fetch(`${h}/api/projects/${s}`);if(!n.ok)throw new Error("Failed to fetch project config");return n.json()}async function V(s,n){let l=await fetch(`${h}/api/projects/${s}/submissions?email=${encodeURIComponent(n)}`);if(!l.ok)throw new Error("Failed to fetch submissions");return l.json()}function Q(s,n,l){document.body.style.overflow="hidden";let d=n?.widget_button_color||"#18181b",m=n?.widget_logo_url||null,f=n?.widget_welcome_message||null;function T(t){let o=t.replace("#",""),i=parseInt(o.substring(0,2),16),c=parseInt(o.substring(2,4),16),y=parseInt(o.substring(4,6),16);return(.299*i+.587*c+.114*y)/255>.5?"#18181b":"#fff"}let g=T(d),e=document.createElement("div");e.id="lc-overlay",e.style.cssText=`
     position: fixed;
     inset: 0;
     z-index: 2147483647;
@@ -6,26 +6,20 @@
     display: flex;
     flex-direction: column;
     font-family: system-ui, -apple-system, sans-serif;
-  `,e.innerHTML=`
+  `;let u=m?`<img src="${m}" alt="Logo" style="height:28px;max-width:160px;object-fit:contain;" />`:'<span id="lc-topbar-title" style="font-size:13px;font-weight:600;letter-spacing:-0.01em;opacity:0.9;">\u2726 Tweaky \u2014 Sandbox Preview</span>';e.innerHTML=`
     <style>
       #lc-overlay * { box-sizing: border-box; }
 
       /* \u2500\u2500 Top bar \u2500\u2500 */
       #lc-topbar {
         height: 44px;
-        background: #18181b;
-        color: #fff;
+        background: ${d};
+        color: ${g};
         display: flex;
         align-items: center;
         justify-content: space-between;
         padding: 0 16px;
         flex-shrink: 0;
-      }
-      #lc-topbar-title {
-        font-size: 13px;
-        font-weight: 600;
-        letter-spacing: -0.01em;
-        opacity: 0.9;
       }
       #lc-topbar-actions {
         display: flex;
@@ -35,7 +29,7 @@
       #lc-chat-toggle {
         background: none;
         border: none;
-        color: #fff;
+        color: ${g};
         cursor: pointer;
         font-size: 13px;
         opacity: 0.6;
@@ -49,7 +43,7 @@
       #lc-close-btn {
         background: none;
         border: none;
-        color: #fff;
+        color: ${g};
         cursor: pointer;
         font-size: 20px;
         opacity: 0.6;
@@ -94,7 +88,7 @@
         width: 28px;
         height: 28px;
         border: 2.5px solid #e4e4e7;
-        border-top-color: #18181b;
+        border-top-color: ${d};
         border-radius: 50%;
         animation: lc-spin 0.7s linear infinite;
       }
@@ -117,30 +111,50 @@
         opacity: 0;
       }
 
-      #lc-panel-header {
-        height: 44px;
+      /* \u2500\u2500 Tabs \u2500\u2500 */
+      #lc-tabs {
         display: flex;
-        align-items: center;
-        justify-content: space-between;
-        padding: 0 16px;
         border-bottom: 1px solid #e4e4e7;
         flex-shrink: 0;
+      }
+      .lc-tab {
+        flex: 1;
+        background: none;
+        border: none;
+        border-bottom: 2px solid transparent;
+        padding: 10px 16px;
         font-size: 13px;
         font-weight: 600;
-        color: #18181b;
+        color: #a1a1aa;
+        cursor: pointer;
+        transition: color 0.15s, border-color 0.15s;
       }
-      #lc-collapse-btn {
+      .lc-tab:hover { color: #71717a; }
+      .lc-tab.active {
+        color: #18181b;
+        border-bottom-color: ${d};
+      }
+      #lc-tab-collapse {
         background: none;
         border: none;
         cursor: pointer;
-        padding: 4px;
+        padding: 4px 12px;
         display: flex;
         align-items: center;
         justify-content: center;
-        border-radius: 4px;
         opacity: 0.5;
+        flex-shrink: 0;
       }
-      #lc-collapse-btn:hover { opacity: 1; }
+      #lc-tab-collapse:hover { opacity: 1; }
+
+      /* \u2500\u2500 Tab content \u2500\u2500 */
+      #lc-chat-content, #lc-history-content {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+      }
+      #lc-history-content { display: none; }
 
       /* \u2500\u2500 Messages \u2500\u2500 */
       #lc-messages {
@@ -259,13 +273,86 @@
         text-align: center;
         flex-shrink: 0;
       }
+
+      /* \u2500\u2500 History \u2500\u2500 */
+      #lc-history-list {
+        flex: 1;
+        overflow-y: auto;
+        padding: 16px;
+      }
+      #lc-history-email-form {
+        padding: 24px 16px;
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        align-items: center;
+      }
+      #lc-history-email-form input {
+        border: 1px solid #e4e4e7;
+        border-radius: 10px;
+        padding: 8px 12px;
+        font-size: 13px;
+        font-family: inherit;
+        outline: none;
+        width: 100%;
+        max-width: 260px;
+      }
+      #lc-history-email-form input:focus { border-color: #18181b; }
+      #lc-history-email-form button {
+        background: #18181b;
+        color: #fff;
+        border: none;
+        border-radius: 10px;
+        padding: 8px 20px;
+        font-size: 13px;
+        font-weight: 500;
+        cursor: pointer;
+      }
+      #lc-history-email-form button:disabled { opacity: 0.5; cursor: not-allowed; }
+      .lc-history-item {
+        padding: 12px;
+        border: 1px solid #e4e4e7;
+        border-radius: 10px;
+        margin-bottom: 8px;
+      }
+      .lc-history-item:last-child { margin-bottom: 0; }
+      .lc-history-prompt {
+        font-size: 13px;
+        color: #18181b;
+        line-height: 1.4;
+        margin-bottom: 6px;
+      }
+      .lc-history-meta {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        font-size: 11px;
+        color: #a1a1aa;
+      }
+      .lc-history-badge {
+        display: inline-block;
+        padding: 1px 6px;
+        border-radius: 4px;
+        font-size: 10px;
+        font-weight: 600;
+        text-transform: uppercase;
+      }
+      .lc-badge-merged { background: #dcfce7; color: #16a34a; }
+      .lc-badge-rejected { background: #fee2e2; color: #dc2626; }
+      .lc-badge-pending { background: #fef9c3; color: #a16207; }
+      .lc-history-empty {
+        text-align: center;
+        color: #a1a1aa;
+        font-size: 13px;
+        padding: 32px 16px;
+      }
     </style>
 
     <div id="lc-topbar">
-      <span id="lc-topbar-title">\u2726 Tweaky \u2014 Sandbox Preview</span>
+      ${u}
       <div id="lc-topbar-actions">
         <button id="lc-chat-toggle" title="Toggle chat panel">
-          <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M2.5 3.5h9M2.5 7h9M2.5 10.5h5" stroke="#fff" stroke-width="1.3" stroke-linecap="round"/></svg>
+          <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M2.5 3.5h9M2.5 7h9M2.5 10.5h5" stroke="${g}" stroke-width="1.3" stroke-linecap="round"/></svg>
           Chat
         </button>
         <button id="lc-close-btn">\xD7</button>
@@ -281,50 +368,71 @@
       </div>
 
       <div id="lc-panel">
-        <div id="lc-panel-header">
-          <span>Chat</span>
-          <button id="lc-collapse-btn" title="Collapse panel">
+        <div id="lc-tabs">
+          <button class="lc-tab active" data-tab="chat">Chat</button>
+          <button class="lc-tab" data-tab="history">History</button>
+          <button id="lc-tab-collapse" title="Collapse panel">
             <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M5 3L9 7L5 11" stroke="#71717a" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
           </button>
         </div>
 
-        <div id="lc-messages"></div>
+        <div id="lc-chat-content">
+          <div id="lc-messages"></div>
 
-        <div id="lc-input-pill">
-          <textarea id="lc-prompt" placeholder="Describe a change\u2026" rows="1" disabled></textarea>
-          <button id="lc-send" disabled>
-            <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M8 13V3M8 3L3 8M8 3L13 8" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
-          </button>
+          <div id="lc-input-pill">
+            <textarea id="lc-prompt" placeholder="Describe a change\u2026" rows="1" disabled></textarea>
+            <button id="lc-send" disabled>
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M8 13V3M8 3L3 8M8 3L13 8" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </button>
+          </div>
+
+          <div id="lc-submit-section" style="display:none">
+            <input type="email" id="lc-email" placeholder="Your email" />
+            <input type="number" id="lc-bounty" placeholder="Bounty (pts)" min="1" />
+            <button id="lc-submit">Submit PR \u2192</button>
+          </div>
+
+          <div id="lc-status">Initialising\u2026</div>
         </div>
 
-        <div id="lc-submit-section" style="display:none">
-          <input type="email" id="lc-email" placeholder="Your email" />
-          <input type="number" id="lc-bounty" placeholder="Bounty (pts)" min="1" />
-          <button id="lc-submit">Submit PR \u2192</button>
+        <div id="lc-history-content">
+          <div id="lc-history-email-form">
+            <p style="font-size:13px;color:#71717a;text-align:center;">Enter your email to see your past submissions.</p>
+            <input type="email" id="lc-history-email" placeholder="your@email.com" />
+            <button id="lc-history-load">Show history</button>
+          </div>
+          <div id="lc-history-list" style="display:none"></div>
         </div>
-
-        <div id="lc-status">Initialising\u2026</div>
       </div>
     </div>
-  `,document.body.appendChild(e);let r=null,d=!1,p=[],T=e.querySelector("#lc-loading"),E=e.querySelector("#lc-preview"),x=e.querySelector("#lc-panel"),c=e.querySelector("#lc-messages"),n=e.querySelector("#lc-prompt"),f=e.querySelector("#lc-send"),C=e.querySelector("#lc-submit-section"),g=e.querySelector("#lc-submit"),B=e.querySelector("#lc-status");function s(o){B.textContent=o}function m(o,a){let l=document.createElement("div");l.className=`lc-msg ${o}`,l.textContent=a,c.appendChild(l),c.scrollTop=c.scrollHeight}let j=new ResizeObserver(()=>{c.scrollTop=c.scrollHeight});j.observe(c),n.addEventListener("input",()=>{n.style.height="auto";let a=(parseFloat(getComputedStyle(n).lineHeight)||20)*4;n.style.height=Math.min(n.scrollHeight,a)+"px"});let y=e.querySelector("#lc-chat-toggle");function L(){let o=x.classList.contains("collapsed");y.style.opacity=o?"1":"0.6",y.style.background=o?"rgba(255,255,255,0.15)":"none"}y.addEventListener("click",()=>{x.classList.toggle("collapsed"),L()}),e.querySelector("#lc-collapse-btn").addEventListener("click",()=>{x.classList.add("collapsed"),L()});function F(){j.disconnect(),document.body.style.overflow="",r&&H(r),e.remove(),t()}e.querySelector("#lc-close-btn").addEventListener("click",F),(async()=>{try{s("Cloning repo and installing dependencies \u2014 this may take a minute\u2026");let{sandboxId:o,previewUrl:a}=await q(i);r=o,T.style.display="none";let l=document.createElement("iframe");l.src=a,l.setAttribute("sandbox","allow-same-origin allow-scripts allow-forms allow-popups allow-modals"),l.setAttribute("allow","clipboard-read; clipboard-write"),E.appendChild(l),n.disabled=!1,f.disabled=!1,s("Ready \u2014 the app is running live. Describe a change below.")}catch(o){T.innerHTML=`
+  `,document.body.appendChild(e);let a=null,w=!1,k=[],X=null,M=e.querySelector("#lc-loading"),P=e.querySelector("#lc-preview"),E=e.querySelector("#lc-panel"),x=e.querySelector("#lc-messages"),r=e.querySelector("#lc-prompt"),S=e.querySelector("#lc-send"),H=e.querySelector("#lc-submit-section"),L=e.querySelector("#lc-submit"),Z=e.querySelector("#lc-status");function p(t){Z.textContent=t}function C(t,o){let i=document.createElement("div");i.className=`lc-msg ${t}`,i.textContent=o,x.appendChild(i),x.scrollTop=x.scrollHeight}f&&C("assistant",f);let F=new ResizeObserver(()=>{x.scrollTop=x.scrollHeight});F.observe(x),r.addEventListener("input",()=>{r.style.height="auto";let o=(parseFloat(getComputedStyle(r).lineHeight)||20)*4;r.style.height=Math.min(r.scrollHeight,o)+"px"});let O=e.querySelectorAll(".lc-tab"),I=e.querySelector("#lc-chat-content"),R=e.querySelector("#lc-history-content");O.forEach(t=>{t.addEventListener("click",()=>{let o=t.getAttribute("data-tab");O.forEach(i=>i.classList.remove("active")),t.classList.add("active"),o==="chat"?(I.style.display="flex",R.style.display="none"):(I.style.display="none",R.style.display="flex")})});let B=e.querySelector("#lc-history-email"),b=e.querySelector("#lc-history-load"),ee=e.querySelector("#lc-history-email-form"),$=e.querySelector("#lc-history-list");b.addEventListener("click",async()=>{let t=B.value.trim();if(t){b.disabled=!0,b.textContent="Loading...";try{let o=await V(s,t);X=o,oe(o),ee.style.display="none",$.style.display="block"}catch{b.textContent="Failed \u2014 try again"}finally{b.disabled=!1,b.textContent==="Loading..."&&(b.textContent="Show history")}}}),B.addEventListener("keydown",t=>{t.key==="Enter"&&(t.preventDefault(),b.click())});function te(t){let o=Date.now()-new Date(t).getTime(),i=Math.floor(o/6e4);if(i<1)return"just now";if(i<60)return`${i}m ago`;let c=Math.floor(i/60);return c<24?`${c}h ago`:`${Math.floor(c/24)}d ago`}function oe(t){if(!t.length){$.innerHTML='<div class="lc-history-empty">No submissions found for this email.</div>';return}$.innerHTML=t.map(o=>{let i=o.status==="merged"?"lc-badge-merged":o.status==="rejected"?"lc-badge-rejected":"lc-badge-pending",c=o.user_prompt.length>80?o.user_prompt.slice(0,80)+"\u2026":o.user_prompt,y=o.pr_url?`<a href="${o.pr_url}" target="_blank" rel="noopener" style="color:${d};text-decoration:none;font-weight:500;">PR #${o.pr_number}</a>`:"";return`
+        <div class="lc-history-item">
+          <div class="lc-history-prompt">${ne(c)}</div>
+          <div class="lc-history-meta">
+            <span class="lc-history-badge ${i}">${o.status}</span>
+            ${y}
+            <span>${te(o.created_at)}</span>
+          </div>
+        </div>
+      `}).join("")}function ne(t){let o=document.createElement("div");return o.textContent=t,o.innerHTML}let j=e.querySelector("#lc-chat-toggle");function A(){let t=E.classList.contains("collapsed");j.style.opacity=t?"1":"0.6",j.style.background=t?"rgba(255,255,255,0.15)":"none"}j.addEventListener("click",()=>{E.classList.toggle("collapsed"),A()}),e.querySelector("#lc-tab-collapse").addEventListener("click",()=>{E.classList.add("collapsed"),A()});function ie(){F.disconnect(),document.body.style.overflow="",a&&Y(a),e.remove(),l()}e.querySelector("#lc-close-btn").addEventListener("click",ie),(async()=>{try{p("Cloning repo and installing dependencies \u2014 this may take a minute\u2026");let{sandboxId:t,previewUrl:o}=await N(s);a=t,M.style.display="none";let i=document.createElement("iframe");i.src=o,i.setAttribute("sandbox","allow-same-origin allow-scripts allow-forms allow-popups allow-modals"),i.setAttribute("allow","clipboard-read; clipboard-write"),P.appendChild(i),r.disabled=!1,S.disabled=!1,p("Ready \u2014 the app is running live. Describe a change below.")}catch(t){M.innerHTML=`
         <div style="color:#ef4444;font-size:20px;margin-bottom:4px;">\u2716</div>
         <span style="color:#71717a;">Failed to start sandbox. Please close and try again.</span>
-      `,s("Something went wrong."),console.error("[Tweaky]",o)}})();async function z(){let o=n.value.trim();if(!(!o||d||!r)){d=!0,p.push(o),f.disabled=!0,n.disabled=!0,n.value="",n.style.height="auto",m("user",o),s("Applying changes\u2026");try{let{changedFiles:a}=await M(r,o);m("assistant",`Done \u2014 changed: ${a.join(", ")}`),C.style.display="flex",s("Changes applied. Review the app above, then submit your PR.")}catch{m("assistant","Something went wrong. Please try again."),s("Error applying changes.")}finally{d=!1,f.disabled=!1,n.disabled=!1,n.focus()}}}f.addEventListener("click",z),n.addEventListener("keydown",o=>{o.key==="Enter"&&!o.shiftKey&&(o.preventDefault(),z())}),g.addEventListener("click",async()=>{let o=e.querySelector("#lc-email").value.trim(),a=e.querySelector("#lc-bounty").value.trim();if(!o||!a){s("Please enter your email and a bounty amount.");return}g.disabled=!0,s("Opening PR on GitHub\u2026");try{let{prUrl:l}=await O({sandboxId:r,projectId:i,prompt:p.join(`
-`),bountyAmount:parseInt(a,10),userEmail:o}),h=document.createElement("div");h.style.cssText="position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;font-family:system-ui,sans-serif;color:#18181b;";let v=document.createElement("div");v.style.fontSize="48px",v.textContent="\u{1F389}";let w=document.createElement("div");w.style.cssText="font-size:20px;font-weight:700",w.textContent="PR opened!";let k=document.createElement("div");k.style.cssText="font-size:14px;color:#71717a",k.textContent="The company will review your change.";let u=document.createElement("a");u.href=/^https:\/\/github\.com\//.test(l)?l:"#",u.target="_blank",u.style.cssText="color:#18181b;font-size:14px;font-weight:500;text-decoration:none;border-bottom:1px solid #18181b;",u.textContent="View on GitHub \u2192",h.append(v,w,k,u),E.replaceChildren(h),C.style.display="none",s("Submitted successfully."),r=null}catch{s("Failed to submit. Please try again."),g.disabled=!1}})}var $=document.currentScript||document.querySelector("script[data-project-id]"),S=$?.getAttribute("data-project-id");S?document.readyState==="loading"?document.addEventListener("DOMContentLoaded",()=>I(S)):I(S):console.error("[Tweaky] Missing data-project-id on script tag");function I(i){let t=document.createElement("button");t.id="lc-trigger",t.textContent="\u2726 Tweak this",t.style.cssText=`
-    position: fixed;
-    bottom: 24px;
-    right: 24px;
-    z-index: 2147483646;
-    background: #18181b;
-    color: #fff;
-    border: none;
-    border-radius: 9999px;
-    padding: 10px 20px;
-    font-size: 14px;
-    font-weight: 600;
-    cursor: pointer;
-    box-shadow: 0 4px 20px rgba(0,0,0,0.25);
-    font-family: system-ui, -apple-system, sans-serif;
-    letter-spacing: -0.01em;
-    transition: transform 0.15s, box-shadow 0.15s;
-  `,t.onmouseenter=()=>{t.style.transform="scale(1.04)",t.style.boxShadow="0 6px 28px rgba(0,0,0,0.3)"},t.onmouseleave=()=>{t.style.transform="scale(1)",t.style.boxShadow="0 4px 20px rgba(0,0,0,0.25)"},document.body.appendChild(t),t.addEventListener("click",()=>{t.style.display="none",R(i,()=>{t.style.display="block"})})}})();
+      `,p("Something went wrong."),console.error("[Tweaky]",t)}})();async function D(){let t=r.value.trim();if(!(!t||w||!a)){w=!0,k.push(t),S.disabled=!0,r.disabled=!0,r.value="",r.style.height="auto",C("user",t),p("Applying changes\u2026");try{let{changedFiles:o}=await J(a,t);C("assistant",`Done \u2014 changed: ${o.join(", ")}`),H.style.display="flex",p("Changes applied. Review the app above, then submit your PR.")}catch{C("assistant","Something went wrong. Please try again."),p("Error applying changes.")}finally{w=!1,S.disabled=!1,r.disabled=!1,r.focus()}}}S.addEventListener("click",D),r.addEventListener("keydown",t=>{t.key==="Enter"&&!t.shiftKey&&(t.preventDefault(),D())}),L.addEventListener("click",async()=>{let t=e.querySelector("#lc-email").value.trim(),o=e.querySelector("#lc-bounty").value.trim();if(!t||!o){p("Please enter your email and a bounty amount.");return}L.disabled=!0,p("Opening PR on GitHub\u2026");try{let{prUrl:i}=await K({sandboxId:a,projectId:s,prompt:k.join(`
+`),bountyAmount:parseInt(o,10),userEmail:t}),c=document.createElement("div");c.style.cssText="position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;font-family:system-ui,sans-serif;color:#18181b;";let y=document.createElement("div");y.style.fontSize="48px",y.textContent="\u{1F389}";let z=document.createElement("div");z.style.cssText="font-size:20px;font-weight:700",z.textContent="PR opened!";let q=document.createElement("div");q.style.cssText="font-size:14px;color:#71717a",q.textContent="The company will review your change.";let v=document.createElement("a");v.href=/^https:\/\/github\.com\//.test(i)?i:"#",v.target="_blank",v.style.cssText="color:#18181b;font-size:14px;font-weight:500;text-decoration:none;border-bottom:1px solid #18181b;",v.textContent="View on GitHub \u2192",c.append(y,z,q,v),P.replaceChildren(c),H.style.display="none",p("Submitted successfully."),a=null}catch{p("Failed to submit. Please try again."),L.disabled=!1}})}var se=document.currentScript||document.querySelector("script[data-project-id]"),_=se?.getAttribute("data-project-id");_?document.readyState==="loading"?document.addEventListener("DOMContentLoaded",()=>W(_)):W(_):console.error("[Tweaky] Missing data-project-id on script tag");async function W(s){let n;try{n=await G(s)}catch(e){console.error("[Tweaky] Failed to load config, using defaults",e),n={}}let l=n.widget_launch_type||"button",d=n.widget_button_color||"#18181b",m=n.widget_button_text||"\u2726 Tweak this",f=n.widget_icon_only||!1;function T(e){let u=e.replace("#",""),a=parseInt(u.substring(0,2),16),w=parseInt(u.substring(2,4),16),k=parseInt(u.substring(4,6),16);return(.299*a+.587*w+.114*k)/255>.5?"#18181b":"#fff"}function g(e){e&&(e.style.display="none"),Q(s,n,()=>{e&&(e.style.display="")})}if(l==="text-link"){let e=document.querySelectorAll("[data-tweaky-trigger]");e.forEach(u=>{u.addEventListener("click",a=>{a.preventDefault(),g(null)})}),e.length||console.warn("[Tweaky] Launch type is text-link but no [data-tweaky-trigger] elements found")}else{let e=document.createElement("button");e.id="lc-trigger",e.textContent=f?"\u2726":m;let u=T(d);e.style.cssText=`
+      position: fixed;
+      bottom: 24px;
+      right: 24px;
+      z-index: 2147483646;
+      background: ${d};
+      color: ${u};
+      border: none;
+      border-radius: 9999px;
+      padding: ${f?"12px 14px":"10px 20px"};
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      box-shadow: 0 4px 20px rgba(0,0,0,0.25);
+      font-family: system-ui, -apple-system, sans-serif;
+      letter-spacing: -0.01em;
+      transition: transform 0.15s, box-shadow 0.15s;
+    `,e.onmouseenter=()=>{e.style.transform="scale(1.04)",e.style.boxShadow="0 6px 28px rgba(0,0,0,0.3)"},e.onmouseleave=()=>{e.style.transform="scale(1)",e.style.boxShadow="0 4px 20px rgba(0,0,0,0.25)"},document.body.appendChild(e),e.addEventListener("click",()=>{g(e)})}}})();

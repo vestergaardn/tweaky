@@ -1,7 +1,10 @@
 import Image from "next/image"
-import { signIn } from "@/lib/auth"
+import { redirect } from "next/navigation"
+import { auth, signIn } from "@/lib/auth"
 
 export default async function Home() {
+  const session = await auth()
+  if (session?.user) redirect("/dashboard")
 
   return (
     <div className="relative min-h-screen bg-[#171d37] flex items-center justify-center overflow-hidden">
@@ -43,7 +46,7 @@ export default async function Home() {
           <form
             action={async () => {
               "use server"
-              await signIn("github")
+              await signIn("github", { redirectTo: "/dashboard" })
             }}
           >
             <button

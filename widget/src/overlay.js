@@ -1,7 +1,21 @@
-import { callCreateSandbox, callPrompt, callSubmit, callKillSandbox } from "./api.js"
+import { callCreateSandbox, callPrompt, callSubmit, callKillSandbox, fetchSubmissions } from "./api.js"
 
-export function openOverlay(projectId, onClose) {
+export function openOverlay(projectId, config, onClose) {
   document.body.style.overflow = "hidden"
+
+  const accentColor = config?.widget_button_color || "#18181b"
+  const logoUrl = config?.widget_logo_url || null
+  const welcomeMessage = config?.widget_welcome_message || null
+
+  function textColorForBg(hex) {
+    const c = hex.replace("#", "")
+    const r = parseInt(c.substring(0, 2), 16)
+    const g = parseInt(c.substring(2, 4), 16)
+    const b = parseInt(c.substring(4, 6), 16)
+    return (0.299 * r + 0.587 * g + 0.114 * b) / 255 > 0.5 ? "#18181b" : "#fff"
+  }
+
+  const topBarFg = textColorForBg(accentColor)
 
   const overlay = document.createElement("div")
   overlay.id = "lc-overlay"
@@ -15,6 +29,10 @@ export function openOverlay(projectId, onClose) {
     font-family: system-ui, -apple-system, sans-serif;
   `
 
+  const titleContent = logoUrl
+    ? `<img src="${logoUrl}" alt="Logo" style="height:28px;max-width:160px;object-fit:contain;" />`
+    : `<span id="lc-topbar-title" style="font-size:13px;font-weight:600;letter-spacing:-0.01em;opacity:0.9;">\u2726 Tweaky \u2014 Sandbox Preview</span>`
+
   overlay.innerHTML = `
     <style>
       #lc-overlay * { box-sizing: border-box; }
@@ -22,19 +40,13 @@ export function openOverlay(projectId, onClose) {
       /* ── Top bar ── */
       #lc-topbar {
         height: 44px;
-        background: #18181b;
-        color: #fff;
+        background: ${accentColor};
+        color: ${topBarFg};
         display: flex;
         align-items: center;
         justify-content: space-between;
         padding: 0 16px;
         flex-shrink: 0;
-      }
-      #lc-topbar-title {
-        font-size: 13px;
-        font-weight: 600;
-        letter-spacing: -0.01em;
-        opacity: 0.9;
       }
       #lc-topbar-actions {
         display: flex;
@@ -44,7 +56,7 @@ export function openOverlay(projectId, onClose) {
       #lc-chat-toggle {
         background: none;
         border: none;
-        color: #fff;
+        color: ${topBarFg};
         cursor: pointer;
         font-size: 13px;
         opacity: 0.6;
@@ -58,7 +70,7 @@ export function openOverlay(projectId, onClose) {
       #lc-close-btn {
         background: none;
         border: none;
-        color: #fff;
+        color: ${topBarFg};
         cursor: pointer;
         font-size: 20px;
         opacity: 0.6;
@@ -103,7 +115,7 @@ export function openOverlay(projectId, onClose) {
         width: 28px;
         height: 28px;
         border: 2.5px solid #e4e4e7;
-        border-top-color: #18181b;
+        border-top-color: ${accentColor};
         border-radius: 50%;
         animation: lc-spin 0.7s linear infinite;
       }
@@ -126,30 +138,50 @@ export function openOverlay(projectId, onClose) {
         opacity: 0;
       }
 
-      #lc-panel-header {
-        height: 44px;
+      /* ── Tabs ── */
+      #lc-tabs {
         display: flex;
-        align-items: center;
-        justify-content: space-between;
-        padding: 0 16px;
         border-bottom: 1px solid #e4e4e7;
         flex-shrink: 0;
+      }
+      .lc-tab {
+        flex: 1;
+        background: none;
+        border: none;
+        border-bottom: 2px solid transparent;
+        padding: 10px 16px;
         font-size: 13px;
         font-weight: 600;
-        color: #18181b;
+        color: #a1a1aa;
+        cursor: pointer;
+        transition: color 0.15s, border-color 0.15s;
       }
-      #lc-collapse-btn {
+      .lc-tab:hover { color: #71717a; }
+      .lc-tab.active {
+        color: #18181b;
+        border-bottom-color: ${accentColor};
+      }
+      #lc-tab-collapse {
         background: none;
         border: none;
         cursor: pointer;
-        padding: 4px;
+        padding: 4px 12px;
         display: flex;
         align-items: center;
         justify-content: center;
-        border-radius: 4px;
         opacity: 0.5;
+        flex-shrink: 0;
       }
-      #lc-collapse-btn:hover { opacity: 1; }
+      #lc-tab-collapse:hover { opacity: 1; }
+
+      /* ── Tab content ── */
+      #lc-chat-content, #lc-history-content {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+      }
+      #lc-history-content { display: none; }
 
       /* ── Messages ── */
       #lc-messages {
@@ -268,13 +300,86 @@ export function openOverlay(projectId, onClose) {
         text-align: center;
         flex-shrink: 0;
       }
+
+      /* ── History ── */
+      #lc-history-list {
+        flex: 1;
+        overflow-y: auto;
+        padding: 16px;
+      }
+      #lc-history-email-form {
+        padding: 24px 16px;
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        align-items: center;
+      }
+      #lc-history-email-form input {
+        border: 1px solid #e4e4e7;
+        border-radius: 10px;
+        padding: 8px 12px;
+        font-size: 13px;
+        font-family: inherit;
+        outline: none;
+        width: 100%;
+        max-width: 260px;
+      }
+      #lc-history-email-form input:focus { border-color: #18181b; }
+      #lc-history-email-form button {
+        background: #18181b;
+        color: #fff;
+        border: none;
+        border-radius: 10px;
+        padding: 8px 20px;
+        font-size: 13px;
+        font-weight: 500;
+        cursor: pointer;
+      }
+      #lc-history-email-form button:disabled { opacity: 0.5; cursor: not-allowed; }
+      .lc-history-item {
+        padding: 12px;
+        border: 1px solid #e4e4e7;
+        border-radius: 10px;
+        margin-bottom: 8px;
+      }
+      .lc-history-item:last-child { margin-bottom: 0; }
+      .lc-history-prompt {
+        font-size: 13px;
+        color: #18181b;
+        line-height: 1.4;
+        margin-bottom: 6px;
+      }
+      .lc-history-meta {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        font-size: 11px;
+        color: #a1a1aa;
+      }
+      .lc-history-badge {
+        display: inline-block;
+        padding: 1px 6px;
+        border-radius: 4px;
+        font-size: 10px;
+        font-weight: 600;
+        text-transform: uppercase;
+      }
+      .lc-badge-merged { background: #dcfce7; color: #16a34a; }
+      .lc-badge-rejected { background: #fee2e2; color: #dc2626; }
+      .lc-badge-pending { background: #fef9c3; color: #a16207; }
+      .lc-history-empty {
+        text-align: center;
+        color: #a1a1aa;
+        font-size: 13px;
+        padding: 32px 16px;
+      }
     </style>
 
     <div id="lc-topbar">
-      <span id="lc-topbar-title">\u2726 Tweaky \u2014 Sandbox Preview</span>
+      ${titleContent}
       <div id="lc-topbar-actions">
         <button id="lc-chat-toggle" title="Toggle chat panel">
-          <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M2.5 3.5h9M2.5 7h9M2.5 10.5h5" stroke="#fff" stroke-width="1.3" stroke-linecap="round"/></svg>
+          <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M2.5 3.5h9M2.5 7h9M2.5 10.5h5" stroke="${topBarFg}" stroke-width="1.3" stroke-linecap="round"/></svg>
           Chat
         </button>
         <button id="lc-close-btn">\u00d7</button>
@@ -290,29 +395,41 @@ export function openOverlay(projectId, onClose) {
       </div>
 
       <div id="lc-panel">
-        <div id="lc-panel-header">
-          <span>Chat</span>
-          <button id="lc-collapse-btn" title="Collapse panel">
+        <div id="lc-tabs">
+          <button class="lc-tab active" data-tab="chat">Chat</button>
+          <button class="lc-tab" data-tab="history">History</button>
+          <button id="lc-tab-collapse" title="Collapse panel">
             <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M5 3L9 7L5 11" stroke="#71717a" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
           </button>
         </div>
 
-        <div id="lc-messages"></div>
+        <div id="lc-chat-content">
+          <div id="lc-messages"></div>
 
-        <div id="lc-input-pill">
-          <textarea id="lc-prompt" placeholder="Describe a change\u2026" rows="1" disabled></textarea>
-          <button id="lc-send" disabled>
-            <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M8 13V3M8 3L3 8M8 3L13 8" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
-          </button>
+          <div id="lc-input-pill">
+            <textarea id="lc-prompt" placeholder="Describe a change\u2026" rows="1" disabled></textarea>
+            <button id="lc-send" disabled>
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M8 13V3M8 3L3 8M8 3L13 8" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </button>
+          </div>
+
+          <div id="lc-submit-section" style="display:none">
+            <input type="email" id="lc-email" placeholder="Your email" />
+            <input type="number" id="lc-bounty" placeholder="Bounty (pts)" min="1" />
+            <button id="lc-submit">Submit PR \u2192</button>
+          </div>
+
+          <div id="lc-status">Initialising\u2026</div>
         </div>
 
-        <div id="lc-submit-section" style="display:none">
-          <input type="email" id="lc-email" placeholder="Your email" />
-          <input type="number" id="lc-bounty" placeholder="Bounty (pts)" min="1" />
-          <button id="lc-submit">Submit PR \u2192</button>
+        <div id="lc-history-content">
+          <div id="lc-history-email-form">
+            <p style="font-size:13px;color:#71717a;text-align:center;">Enter your email to see your past submissions.</p>
+            <input type="email" id="lc-history-email" placeholder="your@email.com" />
+            <button id="lc-history-load">Show history</button>
+          </div>
+          <div id="lc-history-list" style="display:none"></div>
         </div>
-
-        <div id="lc-status">Initialising\u2026</div>
       </div>
     </div>
   `
@@ -322,6 +439,7 @@ export function openOverlay(projectId, onClose) {
   let sandboxId = null
   let isBusy = false
   const allPrompts = []
+  let historyCache = null
 
   const loading = overlay.querySelector("#lc-loading")
   const preview = overlay.querySelector("#lc-preview")
@@ -343,6 +461,11 @@ export function openOverlay(projectId, onClose) {
     messages.scrollTop = messages.scrollHeight
   }
 
+  // Show welcome message if configured
+  if (welcomeMessage) {
+    addMessage("assistant", welcomeMessage)
+  }
+
   // Auto-scroll when messages area content changes
   const scrollObserver = new ResizeObserver(() => {
     messages.scrollTop = messages.scrollHeight
@@ -357,6 +480,104 @@ export function openOverlay(projectId, onClose) {
     promptEl.style.height = Math.min(promptEl.scrollHeight, maxHeight) + "px"
   })
 
+  // ── Tab switching ──
+  const tabs = overlay.querySelectorAll(".lc-tab")
+  const chatContent = overlay.querySelector("#lc-chat-content")
+  const historyContent = overlay.querySelector("#lc-history-content")
+
+  tabs.forEach((tab) => {
+    tab.addEventListener("click", () => {
+      const target = tab.getAttribute("data-tab")
+      tabs.forEach((t) => t.classList.remove("active"))
+      tab.classList.add("active")
+
+      if (target === "chat") {
+        chatContent.style.display = "flex"
+        historyContent.style.display = "none"
+      } else {
+        chatContent.style.display = "none"
+        historyContent.style.display = "flex"
+      }
+    })
+  })
+
+  // ── History tab ──
+  const historyEmailInput = overlay.querySelector("#lc-history-email")
+  const historyLoadBtn = overlay.querySelector("#lc-history-load")
+  const historyEmailForm = overlay.querySelector("#lc-history-email-form")
+  const historyList = overlay.querySelector("#lc-history-list")
+
+  historyLoadBtn.addEventListener("click", async () => {
+    const email = historyEmailInput.value.trim()
+    if (!email) return
+
+    historyLoadBtn.disabled = true
+    historyLoadBtn.textContent = "Loading..."
+
+    try {
+      const submissions = await fetchSubmissions(projectId, email)
+      historyCache = submissions
+      renderHistory(submissions)
+      historyEmailForm.style.display = "none"
+      historyList.style.display = "block"
+    } catch {
+      historyLoadBtn.textContent = "Failed — try again"
+    } finally {
+      historyLoadBtn.disabled = false
+      if (historyLoadBtn.textContent === "Loading...") {
+        historyLoadBtn.textContent = "Show history"
+      }
+    }
+  })
+
+  historyEmailInput.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") {
+      e.preventDefault()
+      historyLoadBtn.click()
+    }
+  })
+
+  function timeAgo(dateStr) {
+    const diff = Date.now() - new Date(dateStr).getTime()
+    const mins = Math.floor(diff / 60000)
+    if (mins < 1) return "just now"
+    if (mins < 60) return `${mins}m ago`
+    const hours = Math.floor(mins / 60)
+    if (hours < 24) return `${hours}h ago`
+    const days = Math.floor(hours / 24)
+    return `${days}d ago`
+  }
+
+  function renderHistory(submissions) {
+    if (!submissions.length) {
+      historyList.innerHTML = `<div class="lc-history-empty">No submissions found for this email.</div>`
+      return
+    }
+
+    historyList.innerHTML = submissions.map((s) => {
+      const badgeClass = s.status === "merged" ? "lc-badge-merged" : s.status === "rejected" ? "lc-badge-rejected" : "lc-badge-pending"
+      const promptText = s.user_prompt.length > 80 ? s.user_prompt.slice(0, 80) + "\u2026" : s.user_prompt
+      const prLink = s.pr_url ? `<a href="${s.pr_url}" target="_blank" rel="noopener" style="color:${accentColor};text-decoration:none;font-weight:500;">PR #${s.pr_number}</a>` : ""
+
+      return `
+        <div class="lc-history-item">
+          <div class="lc-history-prompt">${escapeHtml(promptText)}</div>
+          <div class="lc-history-meta">
+            <span class="lc-history-badge ${badgeClass}">${s.status}</span>
+            ${prLink}
+            <span>${timeAgo(s.created_at)}</span>
+          </div>
+        </div>
+      `
+    }).join("")
+  }
+
+  function escapeHtml(str) {
+    const div = document.createElement("div")
+    div.textContent = str
+    return div.innerHTML
+  }
+
   // Collapse / expand panel
   const chatToggle = overlay.querySelector("#lc-chat-toggle")
   function updateToggleStyle() {
@@ -368,7 +589,7 @@ export function openOverlay(projectId, onClose) {
     panel.classList.toggle("collapsed")
     updateToggleStyle()
   })
-  overlay.querySelector("#lc-collapse-btn").addEventListener("click", () => {
+  overlay.querySelector("#lc-tab-collapse").addEventListener("click", () => {
     panel.classList.add("collapsed")
     updateToggleStyle()
   })

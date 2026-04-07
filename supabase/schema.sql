@@ -18,7 +18,15 @@ create table projects (
   dev_port integer not null default 3000,
   script_tag_id text unique not null default gen_random_uuid()::text,
   env_file_path text not null default '.env',
-  created_at timestamptz default now()
+  widget_launch_type text not null default 'button',
+  widget_button_color text not null default '#18181b',
+  widget_button_text text not null default '✦ Tweak this',
+  widget_icon_only boolean not null default false,
+  widget_logo_url text,
+  widget_welcome_message text,
+  created_at timestamptz default now(),
+  constraint widget_launch_type_check check (widget_launch_type in ('button', 'text-link')),
+  constraint widget_welcome_message_length check (char_length(widget_welcome_message) <= 150)
 );
 
 create table submissions (
